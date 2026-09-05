@@ -1,0 +1,12 @@
+name = "zimrent-api"
+main = "src/index.ts"
+compatibility_date = "2026-09-05"
+
+[vars]
+APP_ENV = "development"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "zimrent-db"
+database_id = "2bfcd890-b176-4358-94fa-23b42790e942"
+migrations_dir = "../../db/migrations"
