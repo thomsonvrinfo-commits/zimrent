@@ -1,0 +1,108 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 40 33% 99%;
+    --foreground: 200 18% 12%;
+    --card: 0 0% 100%;
+    --card-foreground: 200 18% 12%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 200 18% 12%;
+    --primary: 160 84% 27%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 150 20% 96%;
+    --secondary-foreground: 200 18% 18%;
+    --muted: 150 15% 96%;
+    --muted-foreground: 200 10% 45%;
+    --accent: 43 74% 56%;
+    --accent-foreground: 200 18% 14%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 142 71% 45%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+    --border: 150 15% 91%;
+    --input: 150 15% 91%;
+    --ring: 160 84% 27%;
+    --chart-1: 160 84% 27%;
+    --chart-2: 43 74% 56%;
+    --chart-3: 200 70% 50%;
+    --chart-4: 280 65% 60%;
+    --chart-5: 340 75% 55%;
+    --radius: 0.75rem;
+    --font-heading: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
+    --font-body: 'Inter', ui-sans-serif, system-ui, sans-serif;
+    --font-display: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 200 18% 12%;
+    --sidebar-primary: 160 84% 27%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 150 20% 96%;
+    --sidebar-accent-foreground: 200 18% 18%;
+    --sidebar-border: 150 15% 91%;
+    --sidebar-ring: 160 84% 27%;
+  }
+
+  .dark {
+    --background: 200 24% 8%;
+    --foreground: 150 10% 96%;
+    --card: 200 22% 11%;
+    --card-foreground: 150 10% 96%;
+    --popover: 200 22% 11%;
+    --popover-foreground: 150 10% 96%;
+    --primary: 160 70% 45%;
+    --primary-foreground: 200 24% 8%;
+    --secondary: 200 18% 16%;
+    --secondary-foreground: 150 10% 96%;
+    --muted: 200 18% 16%;
+    --muted-foreground: 150 8% 60%;
+    --accent: 43 74% 56%;
+    --accent-foreground: 200 24% 8%;
+    --destructive: 0 62% 45%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 142 60% 50%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 80% 55%;
+    --warning-foreground: 200 24% 8%;
+    --border: 200 18% 18%;
+    --input: 200 18% 18%;
+    --ring: 160 70% 45%;
+    --chart-1: 160 70% 45%;
+    --chart-2: 43 74% 56%;
+    --chart-3: 200 70% 50%;
+    --chart-4: 280 65% 60%;
+    --chart-5: 340 75% 55%;
+    --sidebar-background: 200 24% 10%;
+    --sidebar-foreground: 150 10% 96%;
+    --sidebar-primary: 160 70% 45%;
+    --sidebar-primary-foreground: 200 24% 8%;
+    --sidebar-accent: 200 18% 16%;
+    --sidebar-accent-foreground: 150 10% 96%;
+    --sidebar-border: 200 18% 18%;
+    --sidebar-ring: 160 70% 45%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground font-body antialiased;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-heading;
+  }
+}
+
+@layer utilities {
+  .scrollbar-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+  .scrollbar-thin::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 3px; }
+  .text-balance { text-wrap: balance; }
+}
