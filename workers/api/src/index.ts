@@ -4,6 +4,8 @@ import login from "./routes/auth/login";
 import me from "./routes/auth/me";
 import createListing from "./routes/listings/create";
 import properties from "./routes/properties";
+import messages from "./routes/messages/conversations";
+import sendMessage from "./routes/messages/send";
 
 type Env = {
   Bindings: {
@@ -30,4 +32,9 @@ app.route("/auth/me", me);
 app.route("/properties", properties);
 app.route("/listings", createListing);
 
+app.route("/messages/conversations", messages);
+app.route("/messages/conversations", sendMessage);
+
 export default app;
+import viewings from './routes/viewings';
+app.route('/viewings', viewings);
