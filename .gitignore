@@ -32,3 +32,4 @@ dist-ssr
 # Cloudflare local secrets
 .dev.vars
 .dev.vars.*workers\api\.wrangler\
+workers/api/.wrangler/*
