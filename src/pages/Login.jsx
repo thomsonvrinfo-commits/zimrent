@@ -8,11 +8,21 @@ import { LogIn, Mail, Lock, Loader2 } from "lucide-react";
 import AuthLayout from "@/components/AuthLayout";
 import GoogleIcon from "@/components/GoogleIcon";
 import { safeReturnTo } from "@/lib/authReturnTo";
+import { appParams } from "@/lib/app-params";
+
+const GOOGLE_OAUTH_ERROR_MESSAGES = {
+  google_oauth_failed: "Google sign-in didn't complete. Please try again.",
+  google_oauth_invalid_state: "That Google sign-in link expired. Please try again.",
+  google_oauth_expired: "That Google sign-in link expired. Please try again.",
+  google_email_unverified: "Your Google account's email isn't verified yet.",
+};
 
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
+  const [error, setError] = useState(
+    GOOGLE_OAUTH_ERROR_MESSAGES[appParams.oauthError] || ""
+  );
   const [loading, setLoading] = useState(false);
   // Post-login destination (e.g. the MCP OAuth consent page sends users here
   // with returnTo so the grant flow can resume). Same-origin paths only.

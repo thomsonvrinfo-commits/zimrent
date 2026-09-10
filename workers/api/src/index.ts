@@ -3,6 +3,7 @@ import { cors } from "hono/cors";
 import register from "./routes/auth/register";
 import login from "./routes/auth/login";
 import me from "./routes/auth/me";
+import google from "./routes/auth/google";
 import createListing from "./routes/listings/create";
 import properties from "./routes/properties";
 import messages from "./routes/messages/conversations";
@@ -17,6 +18,11 @@ type Env = {
     // Comma-separated list of allowed frontend origins, e.g.
     // "https://zimrent.pages.dev,https://www.zimrent.co.zw"
     ALLOWED_ORIGINS?: string;
+    // Google OAuth — see workers/api/src/routes/auth/google.ts
+    GOOGLE_CLIENT_ID?: string;
+    GOOGLE_CLIENT_SECRET?: string;
+    GOOGLE_REDIRECT_URI?: string;
+    FRONTEND_URL?: string;
   };
 };
 
@@ -69,6 +75,7 @@ app.get("/public-settings", (c) => {
 app.route("/auth/register", register);
 app.route("/auth/login", login);
 app.route("/auth/me", me);
+app.route("/auth/google", google);
 
 app.route("/properties", properties);
 app.route("/listings", createListing);
