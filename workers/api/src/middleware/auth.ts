@@ -11,6 +11,11 @@ type Env = {
     userId: string;
     userEmail?: string;
     userRole?: string;
+    user: {
+      id: string;
+      email?: string;
+      role?: string;
+    };
   };
 };
 
@@ -26,9 +31,12 @@ export const requireAuth = createMiddleware<Env>(async (c, next) => {
   try {
     const auth = await verifyAccessToken(token, c.env);
 
+    // Some routes read c.get("userId") / c.get("userEmail") / c.get("userRole"),
+    // others read c.get("user").id — set both so every existing route works.
     c.set("userId", auth.userId);
     c.set("userEmail", auth.email);
     c.set("userRole", auth.role);
+    c.set("user", { id: auth.userId, email: auth.email, role: auth.role });
 
     await next();
   } catch {
