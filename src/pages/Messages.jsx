@@ -25,9 +25,8 @@ export default function Messages() {
     if (!user) return;
     (async () => {
       try {
-        const convos = await zimrent.entities.Conversation.filter({});
-        const myConvos = (convos || []).filter(c => c.data?.participants?.includes(user.id));
-        setConversations(myConvos);
+        const convos = await zimrent.conversations.list();
+        setConversations(convos || []);
       } catch (e) {} finally { setLoading(false); }
     })();
   }, [user]);
@@ -36,15 +35,14 @@ export default function Messages() {
     if (!conversationId || !user) return;
     (async () => {
       try {
-        const convo = await zimrent.entities.Conversation.get(conversationId);
-        setActiveConvo(convo);
-        const msgs = await zimrent.entities.Message.filter({ conversation_id: conversationId }, "created_date", 100);
+        const { conversation, messages: msgs } = await zimrent.conversations.get(conversationId);
+        setActiveConvo(conversation);
         setMessages(msgs || []);
-        // Load other participant's profile
-        const otherId = convo.data?.participants?.find(p => p !== user.id);
+        // Load the other participant's profile
+        const otherId = conversation.tenant_id === user.id ? conversation.landlord_id : conversation.tenant_id;
         if (otherId) {
-          const profiles = await zimrent.entities.Profile.filter({ created_by_id: otherId });
-          if (profiles[0]) setOtherProfile(profiles[0]);
+          const otherProfileData = await zimrent.profiles.getPublic(otherId);
+          if (otherProfileData) setOtherProfile(otherProfileData);
         }
       } catch (e) {}
     })();
@@ -54,53 +52,19 @@ export default function Messages() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Real-time subscription
-  useEffect(() => {
-    if (!conversationId) return;
-    const unsubscribe = zimrent.entities.Message.subscribe((event) => {
-      if (event.data?.conversation_id === conversationId) {
-        setMessages(prev => {
-          if (prev.some(m => m.id === event.id)) return prev;
-          return [...prev, event.data].sort((a, b) => new Date(a.created_date) - new Date(b.created_date));
-        });
-      }
-    });
-    return () => { if (unsubscribe) unsubscribe(); };
-  }, [conversationId]);
-
   const sendMessage = async () => {
     if (!newMessage.trim() || !activeConvo) return;
     setSending(true);
     setFraudWarning(null);
     try {
-      // Scan for off-platform payment attempts before sending
-      const scanResult = await zimrent.functions.invoke("scanMessage", {
-        content: newMessage,
-        conversation_id: conversationId
-      });
-      const flagged = scanResult.data?.flagged;
-
-      const msg = await zimrent.entities.Message.create({
-        conversation_id: conversationId,
-        sender_id: user.id,
-        participants: activeConvo.data?.participants,
-        content: newMessage,
-        message_type: "text",
-        fraud_flagged: flagged || false,
-        fraud_reason: flagged ? scanResult.data?.reasons?.join(", ") : "",
-        read: false
-      });
+      // Off-platform-contact scanning happens server-side in send.ts —
+      // the response tells us whether this message got flagged.
+      const msg = await zimrent.conversations.sendMessage(conversationId, newMessage);
       setMessages(prev => [...prev, msg]);
       setNewMessage("");
 
-      // Update conversation preview
-      await zimrent.entities.Conversation.update(conversationId, {
-        last_message_at: new Date().toISOString(),
-        last_message_preview: newMessage.substring(0, 80)
-      });
-
-      if (flagged) {
-        setFraudWarning("This message was flagged for mentioning off-platform payments. For your safety, keep all payments within the platform.");
+      if (msg.flagged) {
+        setFraudWarning("This message was flagged for mentioning off-platform contact details or payments. For your safety, keep all communication and payments within the platform.");
       }
     } catch (e) { alert(e.message); }
     finally { setSending(false); }
@@ -123,8 +87,8 @@ export default function Messages() {
           ) : conversations.map(c => (
             <button key={c.id} onClick={() => navigate(`/messages/${c.id}`)}
               className={`w-full p-4 border-b border-border text-left hover:bg-muted transition-colors ${conversationId === c.id ? "bg-primary/5" : ""}`}>
-              <p className="font-medium text-sm truncate">{c.data?.property_title || "Conversation"}</p>
-              <p className="text-xs text-muted-foreground truncate mt-1">{c.data?.last_message_preview || "No messages yet"}</p>
+              <p className="font-medium text-sm truncate">{c.property_title || "Conversation"}</p>
+              <p className="text-xs text-muted-foreground truncate mt-1">{c.last_message_preview || "No messages yet"}</p>
             </button>
           ))}
         </div>
@@ -140,32 +104,32 @@ export default function Messages() {
                   <ArrowLeft className="w-5 h-5" />
                 </button>
                 <div className="flex-1">
-                  <p className="font-medium text-sm">{activeConvo.data?.property_title}</p>
+                  <p className="font-medium text-sm">{activeConvo.property_title}</p>
                   {otherProfile && (
                     <Link to={`/profile/${otherProfile.id}`} className="text-xs text-muted-foreground hover:underline">
-                      {otherProfile.data?.full_name}
+                      {otherProfile.data?.display_name}
                     </Link>
                   )}
                 </div>
               </div>
               {/* Contextual actions */}
               <div className="flex flex-wrap gap-2 mt-3">
-                {activeConvo.data?.property_id && (
+                {activeConvo.property_id && (
                   <Button size="sm" variant="outline" className="h-8 text-xs" asChild>
-                    <Link to={`/property/${activeConvo.data.property_id}`}><MapPin className="w-3.5 h-3.5 mr-1.5" /> View property</Link>
+                    <Link to={`/property/${activeConvo.property_id}`}><MapPin className="w-3.5 h-3.5 mr-1.5" /> View property</Link>
                   </Button>
                 )}
-                {activeConvo.data?.listing_id && (
+                {activeConvo.listing_id && (
                   <>
                     <Button size="sm" variant="outline" className="h-8 text-xs" asChild>
-                      <Link to={`/reserve/${activeConvo.data.listing_id}`}><Lock className="w-3.5 h-3.5 mr-1.5" /> Reserve</Link>
+                      <Link to={`/reserve/${activeConvo.listing_id}`}><Lock className="w-3.5 h-3.5 mr-1.5" /> Reserve</Link>
                     </Button>
                     <Button size="sm" variant="outline" className="h-8 text-xs" asChild>
-                      <Link to={`/apply/${activeConvo.data.listing_id}`}><FileText className="w-3.5 h-3.5 mr-1.5" /> Apply</Link>
+                      <Link to={`/apply/${activeConvo.listing_id}`}><FileText className="w-3.5 h-3.5 mr-1.5" /> Apply</Link>
                     </Button>
                   </>
                 )}
-                <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => navigate(`/property/${activeConvo.data?.property_id}`)}>
+                <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => navigate(`/property/${activeConvo.property_id}`)}>
                   <Calendar className="w-3.5 h-3.5 mr-1.5" /> Schedule viewing
                 </Button>
               </div>
@@ -176,15 +140,12 @@ export default function Messages() {
                 <p className="text-center text-sm text-muted-foreground py-8">Send a message to start the conversation.</p>
               )}
               {messages.map(m => {
-                const isMine = m.data?.sender_id === user.id || m.created_by_id === user.id;
+                const isMine = m.sender_id === user.id;
                 return (
                   <div key={m.id} className={`flex ${isMine ? "justify-end" : "justify-start"}`}>
                     <div className={`max-w-[75%] rounded-2xl px-4 py-2.5 ${isMine ? "bg-primary text-primary-foreground rounded-br-sm" : "bg-card border border-border rounded-bl-sm"}`}>
-                      {m.data?.message_type === "action" && (
-                        <p className="text-xs font-semibold opacity-70 mb-1">{m.data?.action_type?.replace(/_/g, " ")}</p>
-                      )}
-                      <p className="text-sm whitespace-pre-wrap">{m.data?.content}</p>
-                      {m.data?.fraud_flagged && (
+                      <p className="text-sm whitespace-pre-wrap">{m.body}</p>
+                      {m.flagged && (
                         <div className="flex items-center gap-1.5 mt-2 pt-2 border-t border-warning/30 text-xs text-warning">
                           <ShieldAlert className="w-3.5 h-3.5" /> Flagged for review
                         </div>

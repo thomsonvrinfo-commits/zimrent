@@ -40,19 +40,22 @@ export default function Home() {
   useEffect(() => {
     (async () => {
       try {
-        const allListings = await zimrent.entities.Listing.filter({ status: "active" }, "-availability_confirmed_at", 60);
-        setListings(allListings || []);
-        const propIds = [...new Set((allListings || []).map(l => l.data?.property_id).filter(Boolean))];
-        const props = await Promise.all(propIds.map(id => zimrent.entities.Property.get(id).catch(() => null)));
+        const pairs = await zimrent.properties.search({}, 60);
+        const activePairs = pairs.filter(p => p.listing?.data?.status === "active");
+
+        setListings(activePairs.map(p => p.listing));
+
         const propMap = {};
-        props.forEach(p => { if (p) propMap[p.id] = p; });
+        activePairs.forEach(p => { if (p.property) propMap[p.property.id] = p.property; });
         setProperties(propMap);
 
-        // Load owner profiles
-        const ownerIds = [...new Set((allListings || []).map(l => l.created_by_id).filter(Boolean))];
-        const ownerProfilesData = await Promise.all(ownerIds.map(id => zimrent.entities.Profile.filter({ created_by_id: id }).catch(() => [])));
+        // Load owner profiles (one request per distinct owner, in parallel)
+        const ownerIds = [...new Set(activePairs.map(p => p.property?.created_by_id).filter(Boolean))];
+        const ownerProfilesData = await Promise.all(
+          ownerIds.map(id => zimrent.profiles.getPublic(id).catch(() => null))
+        );
         const ownerMap = {};
-        ownerIds.forEach((id, i) => { if (ownerProfilesData[i]?.[0]) ownerMap[id] = ownerProfilesData[i][0]; });
+        ownerIds.forEach((id, i) => { if (ownerProfilesData[i]) ownerMap[id] = ownerProfilesData[i]; });
         setOwnerProfiles(ownerMap);
       } catch (e) {
         // ignore
@@ -66,7 +69,7 @@ export default function Home() {
     if (!user) return;
     (async () => {
       try {
-        const saved = await zimrent.entities.SavedProperty.filter({ user_id: user.id });
+        const saved = await zimrent.savedProperties.mine();
         setSavedIds(new Set((saved || []).map(s => s.data?.property_id)));
       } catch (e) {}
     })();
@@ -76,11 +79,10 @@ export default function Home() {
     if (!user) return;
     try {
       if (savedIds.has(propertyId)) {
-        const saved = await zimrent.entities.SavedProperty.filter({ user_id: user.id, property_id: propertyId });
-        if (saved[0]) await zimrent.entities.SavedProperty.delete(saved[0].id);
+        await zimrent.savedProperties.unsave(propertyId);
         setSavedIds(prev => { const n = new Set(prev); n.delete(propertyId); return n; });
       } else {
-        await zimrent.entities.SavedProperty.create({ user_id: user.id, property_id: propertyId });
+        await zimrent.savedProperties.save(propertyId);
         setSavedIds(prev => new Set(prev).add(propertyId));
       }
     } catch (e) {}
@@ -93,7 +95,7 @@ export default function Home() {
       const d = prop.data;
       if (city !== "all" && d.city !== city) return false;
       if (propertyType !== "all" && d.property_type !== propertyType) return false;
-      if (listing.data?.monthly_rent > maxRent) return false;
+      if (d.monthly_rent > maxRent) return false;
       if (d.bedrooms < minBedrooms) return false;
       if (waterSource !== "all" && d.water_source !== waterSource) return false;
       if (backupPower !== "all" && d.backup_power !== backupPower) return false;

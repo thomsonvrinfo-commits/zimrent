@@ -12,6 +12,38 @@ type Env = {
   };
 };
 
+const OFF_PLATFORM_KEYWORDS = [
+  "whatsapp",
+  "ecocash",
+  "mukuru",
+  "western union",
+  "moneygram",
+  "cash only",
+  "cash app",
+  "outside the app",
+  "outside this app",
+  "pay me directly",
+];
+
+// Zimbabwe mobile numbers (+263 7X ... or 07X...) and generic 7+ digit runs,
+// plus bare email addresses — the common ways people try to move a deal
+// off-platform before it's verified.
+const PHONE_PATTERN = /(\+?263\s?7\d[\s-]?\d{3}[\s-]?\d{4})|(\b0?7\d{8}\b)|(\b\d{7,}\b)/;
+const EMAIL_PATTERN = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i;
+
+function scanForOffPlatformContact(text: string) {
+  const lower = text.toLowerCase();
+  const reasons: string[] = [];
+
+  for (const keyword of OFF_PLATFORM_KEYWORDS) {
+    if (lower.includes(keyword)) reasons.push(`mentions "${keyword}"`);
+  }
+  if (PHONE_PATTERN.test(text)) reasons.push("looks like a phone number");
+  if (EMAIL_PATTERN.test(text)) reasons.push("looks like an email address");
+
+  return { flagged: reasons.length > 0, reason: reasons.join("; ") };
+}
+
 const sendMessage = new Hono<Env>();
 
 sendMessage.use("/*", requireAuth);
@@ -68,6 +100,7 @@ sendMessage.post("/:id/messages", async (c) => {
   const now = new Date().toISOString();
   const messageType = body.message_type?.trim() || "text";
   const metadata = body.metadata_json ?? null;
+  const { flagged, reason } = scanForOffPlatformContact(messageBody);
 
   await c.env.DB.prepare(
     `INSERT INTO messages (
@@ -77,10 +110,12 @@ sendMessage.post("/:id/messages", async (c) => {
       body,
       message_type,
       metadata_json,
+      flagged,
+      flag_reason,
       created_date,
       updated_date
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
     .bind(
       messageId,
@@ -89,6 +124,8 @@ sendMessage.post("/:id/messages", async (c) => {
       messageBody,
       messageType,
       metadata,
+      flagged ? 1 : 0,
+      flagged ? reason : null,
       now,
       now
     )
@@ -111,6 +148,8 @@ sendMessage.post("/:id/messages", async (c) => {
       body: messageBody,
       message_type: messageType,
       metadata_json: metadata,
+      flagged,
+      flag_reason: flagged ? reason : null,
       read_at: null,
       created_date: now,
       updated_date: now,

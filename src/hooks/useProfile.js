@@ -17,9 +17,9 @@ export function useProfile() {
     let active = true;
     (async () => {
       try {
-        const profiles = await zimrent.entities.Profile.filter({ created_by_id: user.id });
+        const profile = await zimrent.profiles.me();
         if (active) {
-          setProfile(profiles && profiles.length > 0 ? profiles[0] : null);
+          setProfile(profile);
           setLoading(false);
         }
       } catch (e) {
@@ -32,8 +32,8 @@ export function useProfile() {
   const refresh = async () => {
     if (!user) return;
     try {
-      const profiles = await zimrent.entities.Profile.filter({ created_by_id: user.id });
-      setProfile(profiles && profiles.length > 0 ? profiles[0] : null);
+      const profile = await zimrent.profiles.me();
+      setProfile(profile);
     } catch (e) { /* ignore */ }
   };
 

@@ -125,6 +125,167 @@ const entities = new Proxy({}, {
   },
 });
 
+// --- Purpose-built endpoints (as opposed to the generic /entities/* proxy
+// above, which has no backend implementation). Each of these hits a real
+// route and is normalized to the same { id, data: {...} } shape so existing
+// components (PropertyCard, etc.) don't need to change. ---
+
+// GET /properties and GET /properties/:id return one joined row (property
+// columns + listing_id/listing_status/available_from/availability_confirmed_at).
+// Split that back into the { property, listing } pair the rest of the app expects.
+function splitPropertyListingRow(row) {
+  if (!row) return { property: null, listing: null };
+  const {
+    listing_id, listing_status, available_from, availability_confirmed_at,
+    ...propertyFields
+  } = row;
+  const property = normalizeEntity(propertyFields);
+  const listing = listing_id
+    ? normalizeEntity({
+      id: listing_id,
+      property_id: propertyFields.id,
+      created_by_id: propertyFields.created_by_id,
+      status: listing_status,
+      available_from,
+      availability_confirmed_at,
+      created_date: propertyFields.created_date,
+      updated_date: propertyFields.updated_date,
+    })
+    : null;
+  return { property, listing };
+}
+
+const properties = {
+  async search(filters = {}, limit) {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(filters)) {
+      if (value !== undefined && value !== null && value !== '') {
+        params.set(key, String(value));
+      }
+    }
+    if (limit != null) params.set('limit', String(limit));
+    const query = params.toString();
+    const result = await request(`/properties${query ? `?${query}` : ''}`);
+    const rows = Array.isArray(result?.data) ? result.data : [];
+    return rows.map(splitPropertyListingRow);
+  },
+  async get(id) {
+    const result = await request(`/properties/${encodeURIComponent(id)}`);
+    return splitPropertyListingRow(unwrap(result));
+  },
+  async create(data) {
+    return normalizeEntity(await request('/properties', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }));
+  },
+  async update(id, data) {
+    const result = await request(`/properties/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+    return normalizeEntity(unwrap(result));
+  },
+};
+
+const listings = {
+  async mine() {
+    const result = await request('/listings');
+    const rows = Array.isArray(result?.data) ? result.data : [];
+    return rows.map(normalizeEntity);
+  },
+  async create(data) {
+    return normalizeEntity(await request('/listings', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }));
+  },
+  async update(id, data) {
+    const result = await request(`/listings/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+    return normalizeEntity(unwrap(result));
+  },
+};
+
+const profiles = {
+  async me() {
+    try {
+      const result = await request('/profiles/me');
+      return normalizeEntity(unwrap(result));
+    } catch (err) {
+      if (err.status === 404) return null;
+      throw err;
+    }
+  },
+  async createIfMissing(data = {}) {
+    return normalizeEntity(await request('/profiles', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }));
+  },
+  async update(data) {
+    const result = await request('/profiles/me', {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+    return normalizeEntity(unwrap(result));
+  },
+  async getPublic(userId) {
+    try {
+      const result = await request(`/profiles/${encodeURIComponent(userId)}`);
+      return normalizeEntity(unwrap(result));
+    } catch (err) {
+      if (err.status === 404) return null;
+      throw err;
+    }
+  },
+};
+
+const savedProperties = {
+  async mine() {
+    const result = await request('/saved-properties');
+    const rows = Array.isArray(result?.data) ? result.data : [];
+    return rows.map(normalizeEntity);
+  },
+  async save(propertyId) {
+    return normalizeEntity(await request('/saved-properties', {
+      method: 'POST',
+      body: JSON.stringify({ property_id: propertyId }),
+    }));
+  },
+  async unsave(propertyId) {
+    return request(`/saved-properties/${encodeURIComponent(propertyId)}`, {
+      method: 'DELETE',
+    });
+  },
+};
+
+const conversations = {
+  async list() {
+    const result = await request('/messages/conversations');
+    return Array.isArray(result?.data) ? result.data : [];
+  },
+  async start(data) {
+    return request('/messages/conversations', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+  async get(id) {
+    // Returns { conversation, messages } — not entity-normalized, since
+    // nothing else in the app consumes these as generic entities.
+    return request(`/messages/conversations/${encodeURIComponent(id)}`);
+  },
+  async sendMessage(id, body) {
+    return request(`/messages/conversations/${encodeURIComponent(id)}/messages`, {
+      method: 'POST',
+      body: JSON.stringify({ body }),
+    });
+  },
+};
+
 const auth = {
   async me() {
     return unwrap(await request('/auth/me'));
@@ -221,4 +382,4 @@ const app = {
   },
 };
 
-export const zimrent = { entities, auth, integrations, functions, app };
+export const zimrent = { entities, auth, integrations, functions, app, properties, listings, profiles, savedProperties, conversations };
