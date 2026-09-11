@@ -262,26 +262,37 @@ const savedProperties = {
   },
 };
 
-const conversations = {
-  async list() {
-    const result = await request('/messages/conversations');
-    return Array.isArray(result?.data) ? result.data : [];
-  },
-  async start(data) {
-    return request('/messages/conversations', {
+const viewings = {
+  async create(data) {
+    return request('/viewings', {
       method: 'POST',
       body: JSON.stringify(data),
     });
   },
-  async get(id) {
-    // Returns { conversation, messages } — not entity-normalized, since
-    // nothing else in the app consumes these as generic entities.
-    return request(`/messages/conversations/${encodeURIComponent(id)}`);
+
+  async list() {
+    return request('/viewings');
   },
-  async sendMessage(id, body) {
-    return request(`/messages/conversations/${encodeURIComponent(id)}/messages`, {
+
+  async get(id) {
+    return request(`/viewings/${encodeURIComponent(id)}`);
+  },
+
+  async accept(id) {
+    return request(`/viewings/${encodeURIComponent(id)}/accept`, {
       method: 'POST',
-      body: JSON.stringify({ body }),
+    });
+  },
+
+  async decline(id) {
+    return request(`/viewings/${encodeURIComponent(id)}/decline`, {
+      method: 'POST',
+    });
+  },
+
+  async cancel(id) {
+    return request(`/viewings/${encodeURIComponent(id)}/cancel`, {
+      method: 'POST',
     });
   },
 };
@@ -382,4 +393,16 @@ const app = {
   },
 };
 
-export const zimrent = { entities, auth, integrations, functions, app, properties, listings, profiles, savedProperties, conversations };
+export const zimrent = {
+  entities,
+  auth,
+  integrations,
+  functions,
+  app,
+  properties,
+  listings,
+  profiles,
+  savedProperties,
+  conversations,
+  viewings,
+};
