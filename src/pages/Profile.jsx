@@ -88,7 +88,6 @@ function getDisplayName(profile, user) {
   return (
     profile?.data?.display_name ||
     user?.display_name ||
-    user?.full_name ||
     user?.email ||
     ""
   );
@@ -747,7 +746,6 @@ export default function Profile() {
                   <h2 className="text-lg font-bold font-heading">
                     {profileData?.display_name ||
                       user?.display_name ||
-                      user?.full_name ||
                       "ZimRent user"}
                   </h2>
 

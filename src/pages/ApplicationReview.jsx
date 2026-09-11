@@ -27,9 +27,9 @@ export default function ApplicationReview() {
       try {
         const app = await zimrent.entities.Application.get(id);
         setApplication(app);
-        if (app) {
-          const profiles = await zimrent.entities.Profile.filter({ created_by_id: app.data?.tenant_id });
-          if (profiles[0]) setTenantProfile(profiles[0]);
+        if (app?.data?.tenant_id) {
+          const tenantProfileData = await zimrent.profiles.getPublic(app.data.tenant_id).catch(() => null);
+          if (tenantProfileData) setTenantProfile(tenantProfileData);
         }
       } catch (e) {} finally { setLoading(false); }
     })();
@@ -84,10 +84,10 @@ export default function ApplicationReview() {
           <CardContent className="p-5">
             <div className="flex items-center gap-3 mb-4">
               <div className="w-11 h-11 rounded-full bg-primary/10 flex items-center justify-center text-primary font-semibold">
-                {tenantProfile.data?.full_name?.split(" ").map(s => s[0]).slice(0, 2).join("")}
+                {tenantProfile.data?.display_name?.split(" ").map(s => s[0]).slice(0, 2).join("")}
               </div>
               <div>
-                <p className="font-medium">{tenantProfile.data?.full_name}</p>
+                <p className="font-medium">{tenantProfile.data?.display_name}</p>
                 <IdentityBadge status={tenantProfile.data?.identity_status} />
               </div>
             </div>

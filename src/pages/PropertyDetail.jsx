@@ -866,7 +866,7 @@ const photos = propertyMedia
                   className="flex items-center gap-3 hover:bg-muted rounded-lg p-2 -m-2 transition-colors"
                 >
                   <div className="w-11 h-11 rounded-full bg-primary/10 flex items-center justify-center text-primary font-semibold">
-                    {ownerProfile.data?.full_name
+                    {ownerProfile.data?.display_name
                       ?.split(" ")
                       .map((s) => s[0])
                       .slice(0, 2)
@@ -875,7 +875,7 @@ const photos = propertyMedia
 
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-sm truncate">
-                      {ownerProfile.data?.full_name}
+                      {ownerProfile.data?.display_name}
                     </p>
 
                     <p className="text-xs text-muted-foreground capitalize">

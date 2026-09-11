@@ -83,7 +83,7 @@ export default function AppLayout() {
     logout();
   };
 
-  const initials = (profile?.data?.full_name || user?.full_name || user?.email || "U")
+  const initials = (profile?.data?.display_name || user?.display_name || user?.email || "U")
     .split(" ").map(s => s[0]).slice(0, 2).join("").toUpperCase();
 
   return (
@@ -124,7 +124,7 @@ export default function AppLayout() {
               <AvatarFallback className="bg-primary/10 text-primary text-xs font-semibold">{initials}</AvatarFallback>
             </Avatar>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-foreground truncate">{profile?.data?.full_name || user?.full_name || "User"}</p>
+              <p className="text-sm font-medium text-foreground truncate">{profile?.data?.display_name || user?.display_name || "User"}</p>
               <p className="text-xs text-muted-foreground capitalize">{role}</p>
             </div>
           </Link>
