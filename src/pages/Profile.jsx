@@ -197,11 +197,12 @@ export default function Profile() {
       };
 
       const profileData = {
-        display_name: form.full_name?.trim() || null,
-        phone: form.phone?.trim() || null,
-        bio: form.bio?.trim() || null,
-        preferences_json: JSON.stringify(preferences)
-      };
+  display_name: form.full_name?.trim() || null,
+  phone: form.phone?.trim() || null,
+  bio: form.bio?.trim() || null,
+  preferences_json: JSON.stringify(preferences),
+  role: form.role || "tenant"
+};
 
       if (myProfile) {
         await zimrent.profiles.update(profileData);

@@ -30,6 +30,7 @@ export default function PropertyDetail() {
   const [property, setProperty] = useState(null);
   const [listing, setListing] = useState(null);
   const [ownerProfile, setOwnerProfile] = useState(null);
+const [propertyMedia, setPropertyMedia] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activePhoto, setActivePhoto] = useState(0);
   const [viewingModal, setViewingModal] = useState(false);
@@ -48,6 +49,13 @@ export default function PropertyDetail() {
         const result = await zimrent.properties.get(id);
 
         setProperty(result.property);
+
+        try {
+          const media = await zimrent.properties.media(id);
+          setPropertyMedia(media);
+        } catch (mediaError) {
+          setPropertyMedia([]);
+        }
 
         if (result.property) {
           const currentListing = result.listing;
@@ -180,20 +188,34 @@ export default function PropertyDetail() {
   }
 
   const d = property.data || {};
-  const listingData = listing?.data || {};
+const listingData = listing?.data || {};
 
-  const photos = d.photos || [];
-  const status = listingData.status;
-  const statusInfo = listing ? LISTING_STATUS[status] : null;
+const status = listingData.status;
+const statusInfo = listing ? LISTING_STATUS[status] : null;
 
-  const canReserve =
-    listing &&
-    status === "active" &&
-    listing.created_by_id !== user?.id;
+const canReserve =
+  listing &&
+  status === "active" &&
+  listing.created_by_id !== user?.id;
 
-  const isOwner =
-    listing &&
-    listing.created_by_id === user?.id;
+const isOwner =
+  listing &&
+  listing.created_by_id === user?.id;
+
+const apiBaseUrl =
+  import.meta.env.VITE_API_BASE_URL || "/api";
+
+const photos = propertyMedia
+  .filter((item) => item.media_type === "photo" && item.id)
+  .map((item) => {
+    const basePath = `/media/property/${encodeURIComponent(
+      item.property_id
+    )}/${encodeURIComponent(item.id)}`;
+
+    return isOwner
+      ? `${apiBaseUrl}${basePath}/owner`
+      : `${apiBaseUrl}${basePath}`;
+  });
 
   const estimatedMoveInCost =
     (Number(d.monthly_rent) || 0) +

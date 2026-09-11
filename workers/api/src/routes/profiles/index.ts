@@ -27,17 +27,27 @@ type ProfileRow = {
   updated_date: string;
 };
 
+type ProfileWithRole = ProfileRow & {
+  role: string;
+};
+
 const profiles = new Hono<Env>();
 
-// GET /profiles/me — protected, full profile for the logged-in user
+// GET /profiles/me — protected, full profile + current account role
 profiles.get("/me", requireAuth, async (c) => {
   const userId = c.get("userId");
 
   const profile = await c.env.DB.prepare(
-    `SELECT * FROM profiles WHERE created_by_id = ?`
+    `SELECT
+       p.*,
+       u.role
+     FROM profiles p
+     INNER JOIN users u
+       ON u.id = p.created_by_id
+     WHERE p.created_by_id = ?`
   )
     .bind(userId)
-    .first<ProfileRow>();
+    .first<ProfileWithRole>();
 
   if (!profile) {
     return c.json({ message: "Profile not found" }, 404);
@@ -46,17 +56,21 @@ profiles.get("/me", requireAuth, async (c) => {
   return c.json({ data: profile });
 });
 
-// POST /profiles — protected, create-if-missing (idempotent) for the logged-in user.
-// Every register/google-signup path already creates one, so this mainly
-// covers older accounts or edge cases where it's missing.
+// POST /profiles — protected, create-if-missing
 profiles.post("/", requireAuth, async (c) => {
   const userId = c.get("userId");
 
   const existing = await c.env.DB.prepare(
-    `SELECT * FROM profiles WHERE created_by_id = ?`
+    `SELECT
+       p.*,
+       u.role
+     FROM profiles p
+     INNER JOIN users u
+       ON u.id = p.created_by_id
+     WHERE p.created_by_id = ?`
   )
     .bind(userId)
-    .first<ProfileRow>();
+    .first<ProfileWithRole>();
 
   if (existing) {
     return c.json({ data: existing }, 200);
@@ -74,8 +88,16 @@ profiles.post("/", requireAuth, async (c) => {
 
   await c.env.DB.prepare(
     `INSERT INTO profiles (
-      id, created_by_id, display_name, phone, avatar_url, bio, created_date, updated_date
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      id,
+      created_by_id,
+      display_name,
+      phone,
+      avatar_url,
+      bio,
+      created_date,
+      updated_date
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
   )
     .bind(
       profileId,
@@ -90,15 +112,21 @@ profiles.post("/", requireAuth, async (c) => {
     .run();
 
   const created = await c.env.DB.prepare(
-    `SELECT * FROM profiles WHERE id = ?`
+    `SELECT
+       p.*,
+       u.role
+     FROM profiles p
+     INNER JOIN users u
+       ON u.id = p.created_by_id
+     WHERE p.id = ?`
   )
     .bind(profileId)
-    .first<ProfileRow>();
+    .first<ProfileWithRole>();
 
   return c.json({ data: created }, 201);
 });
 
-// PATCH /profiles/me — protected, update the logged-in user's own profile only
+// PATCH /profiles/me — protected, update own profile + tenant/owner role
 profiles.patch("/me", requireAuth, async (c) => {
   const userId = c.get("userId");
 
@@ -108,6 +136,7 @@ profiles.patch("/me", requireAuth, async (c) => {
     bio?: string;
     avatar_url?: string;
     preferences_json?: string;
+    role?: string;
   }>();
 
   const fields: string[] = [];
@@ -118,13 +147,92 @@ profiles.patch("/me", requireAuth, async (c) => {
     values.push(value);
   };
 
-  if (body.display_name !== undefined) add("display_name", body.display_name.trim() || null);
-  if (body.phone !== undefined) add("phone", body.phone.trim() || null);
-  if (body.bio !== undefined) add("bio", body.bio.trim() || null);
-  if (body.avatar_url !== undefined) add("avatar_url", body.avatar_url.trim() || null);
-  if (body.preferences_json !== undefined) add("preferences_json", body.preferences_json);
+  if (body.display_name !== undefined) {
+    add("display_name", body.display_name.trim() || null);
+  }
+
+  if (body.phone !== undefined) {
+    add("phone", body.phone.trim() || null);
+  }
+
+  if (body.bio !== undefined) {
+    add("bio", body.bio.trim() || null);
+  }
+
+  if (body.avatar_url !== undefined) {
+    add("avatar_url", body.avatar_url.trim() || null);
+  }
+
+  if (body.preferences_json !== undefined) {
+    add("preferences_json", body.preferences_json);
+  }
+
+  const requestedRole = body.role?.trim().toLowerCase();
+
+  if (requestedRole !== undefined) {
+    if (!["tenant", "owner", "agent"].includes(requestedRole)) {
+      return c.json(
+        { message: "Invalid account role" },
+        400
+      );
+    }
+
+    const currentUser = await c.env.DB
+      .prepare(`
+        SELECT id, role
+        FROM users
+        WHERE id = ?
+        LIMIT 1
+      `)
+      .bind(userId)
+      .first<{
+        id: string;
+        role: string;
+      }>();
+
+    if (!currentUser) {
+      return c.json({ message: "User not found" }, 404);
+    }
+
+    // Admin accounts cannot be changed through the normal profile flow.
+    if (currentUser.role === "admin") {
+      return c.json(
+        { message: "Admin account role cannot be changed here" },
+        403
+      );
+    }
+
+    await c.env.DB
+      .prepare(`
+        UPDATE users
+        SET role = ?, updated_date = ?
+        WHERE id = ?
+      `)
+      .bind(
+        requestedRole,
+        new Date().toISOString(),
+        userId
+      )
+      .run();
+  }
 
   if (fields.length === 0) {
+    if (requestedRole !== undefined) {
+      const updated = await c.env.DB.prepare(
+        `SELECT
+           p.*,
+           u.role
+         FROM profiles p
+         INNER JOIN users u
+           ON u.id = p.created_by_id
+         WHERE p.created_by_id = ?`
+      )
+        .bind(userId)
+        .first<ProfileWithRole>();
+
+      return c.json({ data: updated });
+    }
+
     return c.json({ message: "No fields to update" }, 400);
   }
 
@@ -132,7 +240,9 @@ profiles.patch("/me", requireAuth, async (c) => {
   values.push(userId);
 
   const result = await c.env.DB.prepare(
-    `UPDATE profiles SET ${fields.join(", ")} WHERE created_by_id = ?`
+    `UPDATE profiles
+     SET ${fields.join(", ")}
+     WHERE created_by_id = ?`
   )
     .bind(...values)
     .run();
@@ -142,24 +252,41 @@ profiles.patch("/me", requireAuth, async (c) => {
   }
 
   const updated = await c.env.DB.prepare(
-    `SELECT * FROM profiles WHERE created_by_id = ?`
+    `SELECT
+       p.*,
+       u.role
+     FROM profiles p
+     INNER JOIN users u
+       ON u.id = p.created_by_id
+     WHERE p.created_by_id = ?`
   )
     .bind(userId)
-    .first<ProfileRow>();
+    .first<ProfileWithRole>();
 
   return c.json({ data: updated });
 });
 
-// GET /profiles/:userId — public, safe subset only (no phone/preferences).
-// Used to show a landlord's display name/verification badge on listings.
+// GET /profiles/:userId — public, safe subset only
 profiles.get("/:userId", async (c) => {
   const targetUserId = c.req.param("userId");
 
   const profile = await c.env.DB.prepare(
-    `SELECT id, created_by_id, display_name, avatar_url, bio,
-            authority_status, identity_status, verification_status,
-            created_date, updated_date
-     FROM profiles WHERE created_by_id = ?`
+    `SELECT
+       p.id,
+       p.created_by_id,
+       p.display_name,
+       p.avatar_url,
+       p.bio,
+       p.authority_status,
+       p.identity_status,
+       p.verification_status,
+       p.created_date,
+       p.updated_date,
+       u.role
+     FROM profiles p
+     INNER JOIN users u
+       ON u.id = p.created_by_id
+     WHERE p.created_by_id = ?`
   )
     .bind(targetUserId)
     .first();

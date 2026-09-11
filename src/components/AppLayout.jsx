@@ -49,7 +49,7 @@ export default function AppLayout() {
   const [notifications, setNotifications] = useState([]);
   const [notifOpen, setNotifOpen] = useState(false);
 
-  const role = profile?.data?.role || "tenant";
+ const role = user?.role || profile?.data?.role || "tenant";
   const navItems = NAV_SECTIONS[role] || NAV_SECTIONS.tenant;
   const effectiveNav = isAdmin ? NAV_SECTIONS.admin : navItems;
 

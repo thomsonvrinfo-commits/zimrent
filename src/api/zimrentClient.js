@@ -173,6 +173,10 @@ const properties = {
     const result = await request(`/properties/${encodeURIComponent(id)}`);
     return splitPropertyListingRow(unwrap(result));
   },
+     async media(id) {
+    const result = await request(`/properties/${encodeURIComponent(id)}/media`);
+    return Array.isArray(result?.data) ? result.data : [];
+  },
   async create(data) {
     return normalizeEntity(await request('/properties', {
       method: 'POST',
@@ -297,6 +301,28 @@ const viewings = {
   },
 };
 
+const conversations = {
+  async list() {
+    const result = await request('/messages/conversations');
+    return Array.isArray(result?.data) ? result.data : [];
+  },
+
+  async get(id) {
+    return unwrap(
+      await request(`/messages/conversations/${encodeURIComponent(id)}`)
+    );
+  },
+
+  async create(data) {
+    return unwrap(
+      await request('/messages/conversations', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      })
+    );
+  },
+};
+
 const auth = {
   async me() {
     return unwrap(await request('/auth/me'));
@@ -361,23 +387,33 @@ const auth = {
     return Boolean(getToken());
   },
 };
-
 const integrations = {
   Core: {
-    async UploadFile({ file }) {
+    async UploadFile({ file, property_id }) {
       const form = new FormData();
       form.append('file', file);
-      return unwrap(await request('/uploads', { method: 'POST', body: form }));
+      form.append('property_id', property_id);
+      form.append('kind', 'photo');
+
+      return unwrap(await request('/uploads', {
+        method: 'POST',
+        body: form,
+      }));
     },
-    async UploadPrivateFile({ file }) {
+
+    async UploadPrivateFile({ file, property_id }) {
       const form = new FormData();
       form.append('file', file);
-      form.append('visibility', 'private');
-      return unwrap(await request('/uploads', { method: 'POST', body: form }));
+      form.append('property_id', property_id);
+      form.append('kind', 'document');
+
+      return unwrap(await request('/uploads', {
+        method: 'POST',
+        body: form,
+      }));
     },
   },
 };
-
 const functions = {
   async invoke(name, payload = {}) {
     return unwrap(await request(`/functions/${encodeURIComponent(name)}`, {

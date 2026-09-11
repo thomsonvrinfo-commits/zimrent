@@ -15,3 +15,7 @@ binding = "DB"
 database_name = "zimrent-db"
 database_id = "2bfcd890-b176-4358-94fa-23b42790e942"
 migrations_dir = "../../db/migrations"
+
+[[r2_buckets]]
+binding = "zimrent_media"
+bucket_name = "zimrent-media"

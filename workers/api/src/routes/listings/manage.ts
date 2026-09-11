@@ -56,29 +56,28 @@ manage.patch("/:id", async (c) => {
   const fields: string[] = [];
   const values: unknown[] = [];
 
-  const allowedStatuses = [
-    "draft",
-    "pending_verification",
-    "active",
-    "reservation_pending",
-    "reserved",
-    "application_pending",
-    "lease_pending",
-    "rented",
-    "inactive",
-  ];
+  const allowedOwnerStatuses = [
+  "draft",
+  "pending_verification",
+  "inactive",
+];
 
-  if (body.status !== undefined) {
-    if (!allowedStatuses.includes(body.status)) {
-      return c.json({ message: "Invalid status" }, 400);
-    }
-    fields.push("status = ?");
-    values.push(body.status);
-    if (body.status === "active") {
-      fields.push("availability_confirmed_at = ?");
-      values.push(new Date().toISOString());
-    }
+if (body.status !== undefined) {
+  if (!allowedOwnerStatuses.includes(body.status)) {
+    return c.json(
+      { message: "You cannot set that listing status" },
+      403
+    );
   }
+
+  fields.push("status = ?");
+  values.push(body.status);
+
+  if (body.status !== "active") {
+    fields.push("availability_confirmed_at = ?");
+    values.push(null);
+  }
+}
 
   if (body.available_from !== undefined) {
     fields.push("available_from = ?");

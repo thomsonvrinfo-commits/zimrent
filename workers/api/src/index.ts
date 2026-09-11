@@ -9,15 +9,19 @@ import resetPassword from "./routes/auth/resetPassword";
 import createListing from "./routes/listings/create";
 import manageListings from "./routes/listings/manage";
 import properties from "./routes/properties";
+import uploads from "./routes/uploads";
+import media from "./routes/media";
 import messages from "./routes/messages/conversations";
 import sendMessage from "./routes/messages/send";
 import viewings from "./routes/viewings";
 import profiles from "./routes/profiles";
 import savedProperties from "./routes/saved-properties";
 
+
 type Env = {
   Bindings: {
     DB: D1Database;
+    zimrent_media: R2Bucket;
     APP_ENV: string;
     JWT_SECRET?: string;
     ALLOWED_ORIGINS?: string;
@@ -86,5 +90,7 @@ app.route("/viewings", viewings);
 
 app.route("/profiles", profiles);
 app.route("/saved-properties", savedProperties);
+app.route("/uploads", uploads);
+app.route("/media", media);
 
 export default app;

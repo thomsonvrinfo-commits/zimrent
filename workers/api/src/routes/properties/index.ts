@@ -142,6 +142,55 @@ properties.get("/:id", async (c) => {
   return c.json({ data: property });
 });
 
+// PUBLIC: property photos
+properties.get("/:id/media", async (c) => {
+  const propertyId = c.req.param("id");
+
+  const property = await c.env.DB
+    .prepare(`
+      SELECT
+        p.id,
+        l.status AS listing_status
+      FROM properties p
+      LEFT JOIN listings l
+        ON l.property_id = p.id
+      WHERE p.id = ?
+      LIMIT 1
+    `)
+    .bind(propertyId)
+    .first<{
+      id: string;
+      listing_status: string | null;
+    }>();
+
+  if (!property) {
+    return c.json({ message: "Property not found" }, 404);
+  }
+
+  const media = await c.env.DB
+    .prepare(`
+      SELECT
+        id,
+        property_id,
+        media_type,
+        storage_key,
+        mime_type,
+        file_size,
+        sort_order,
+        created_date
+      FROM property_media
+      WHERE property_id = ?
+      ORDER BY sort_order ASC, created_date ASC
+    `)
+    .bind(propertyId)
+    .all();
+
+  return c.json({
+    data: media.results,
+    count: media.results.length,
+  });
+});
+
 // PROTECTED: property creation
 properties.post("/", requireAuth, async (c) => {
   const userId = c.get("userId");

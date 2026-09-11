@@ -97,8 +97,8 @@ create.post("/", async (c) => {
       listingId,
       userId,
       propertyId,
-      "active",
-      now,
+      "pending_verification",
+       null,
       body.available_from?.trim() || null,
       now,
       now
