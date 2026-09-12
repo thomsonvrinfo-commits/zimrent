@@ -50,10 +50,6 @@ uploads.post("/", requireAuth, async (c) => {
       ? form.kind.trim().toLowerCase()
       : "";
 
-  if (!propertyId) {
-    return c.json({ message: "property_id is required" }, 400);
-  }
-
   if (kind !== "photo" && kind !== "document") {
     return c.json(
       { message: "kind must be photo or document" },
@@ -61,25 +57,71 @@ uploads.post("/", requireAuth, async (c) => {
     );
   }
 
-  const property = await c.env.DB
-    .prepare(`
-      SELECT id, created_by_id
-      FROM properties
-      WHERE id = ?
-      LIMIT 1
-    `)
-    .bind(propertyId)
-    .first<{
-      id: string;
-      created_by_id: string;
-    }>();
+  const documentType =
+    typeof form.document_type === "string"
+      ? form.document_type.trim().toLowerCase()
+      : "";
 
-  if (!property) {
-    return c.json({ message: "Property not found" }, 404);
+  if (
+    kind === "document" &&
+    documentType !== "identity" &&
+    documentType !== "authority"
+  ) {
+    return c.json(
+      {
+        message:
+          "document_type must be identity or authority",
+      },
+      400
+    );
   }
 
-  if (property.created_by_id !== userId) {
-    return c.json({ message: "Forbidden" }, 403);
+  const propertyRequired =
+    kind === "photo" ||
+    (kind === "document" && documentType === "authority");
+
+  if (propertyRequired && !propertyId) {
+    return c.json(
+      { message: "property_id is required" },
+      400
+    );
+  }
+
+  if (
+    kind === "document" &&
+    documentType === "identity" &&
+    propertyId
+  ) {
+    return c.json(
+      {
+        message:
+          "Identity documents must not be attached to a property",
+      },
+      400
+    );
+  }
+
+  if (propertyRequired) {
+    const property = await c.env.DB
+      .prepare(`
+        SELECT id, created_by_id
+        FROM properties
+        WHERE id = ?
+        LIMIT 1
+      `)
+      .bind(propertyId)
+      .first<{
+        id: string;
+        created_by_id: string;
+      }>();
+
+    if (!property) {
+      return c.json({ message: "Property not found" }, 404);
+    }
+
+    if (property.created_by_id !== userId) {
+      return c.json({ message: "Forbidden" }, 403);
+    }
   }
 
   if (file.size <= 0) {
@@ -119,15 +161,20 @@ uploads.post("/", requireAuth, async (c) => {
   }
 
   const fileId = crypto.randomUUID();
+
   const extension =
     file.name.includes(".")
-      ? file.name.substring(file.name.lastIndexOf(".")).toLowerCase()
+      ? file.name
+          .substring(file.name.lastIndexOf("."))
+          .toLowerCase()
       : "";
 
   const storageKey =
     kind === "photo"
       ? `properties/${propertyId}/photos/${fileId}${extension}`
-      : `properties/${propertyId}/documents/${fileId}${extension}`;
+      : documentType === "identity"
+        ? `users/${userId}/identity/${fileId}${extension}`
+        : `properties/${propertyId}/documents/${fileId}${extension}`;
 
   const now = new Date().toISOString();
 
@@ -143,10 +190,14 @@ uploads.post("/", requireAuth, async (c) => {
         uploadedBy: userId,
         originalName: file.name,
         kind,
+        documentType,
       },
     }
   );
 
+  /*
+   * Property photo
+   */
   if (kind === "photo") {
     const existing = await c.env.DB
       .prepare(`
@@ -173,9 +224,10 @@ uploads.post("/", requireAuth, async (c) => {
           mime_type,
           file_size,
           sort_order,
-          created_date
+          created_date,
+          updated_date
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
       .bind(
         mediaId,
@@ -186,6 +238,7 @@ uploads.post("/", requireAuth, async (c) => {
         file.type,
         file.size,
         sortOrder,
+        now,
         now
       )
       .run();
@@ -206,6 +259,58 @@ uploads.post("/", requireAuth, async (c) => {
     );
   }
 
+  /*
+   * Account-scoped identity document
+   */
+  if (documentType === "identity") {
+    const documentId = crypto.randomUUID();
+
+    await c.env.DB
+      .prepare(`
+        INSERT INTO identity_documents (
+          id,
+          uploaded_by_id,
+          document_type,
+          storage_key,
+          mime_type,
+          file_size,
+          status,
+          created_date,
+          updated_date
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `)
+      .bind(
+        documentId,
+        userId,
+        "identity",
+        storageKey,
+        file.type,
+        file.size,
+        "pending",
+        now,
+        now
+      )
+      .run();
+
+    return c.json(
+      {
+        data: {
+          id: documentId,
+          document_type: "identity",
+          storage_key: storageKey,
+          mime_type: file.type,
+          file_size: file.size,
+          status: "pending",
+        },
+      },
+      201
+    );
+  }
+
+  /*
+   * Property authority document
+   */
   const documentId = crypto.randomUUID();
 
   await c.env.DB

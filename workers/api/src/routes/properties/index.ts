@@ -1,5 +1,9 @@
 import { Hono } from "hono";
 import { requireAuth } from "../../middleware/auth";
+import {
+  hasCapability,
+  hasApprovedAuthority,
+} from "../../services/capabilities";
 
 type Env = {
   Bindings: {
@@ -52,6 +56,7 @@ properties.get("/", async (c) => {
 
   if (minRent) {
     const value = Number(minRent);
+
     if (Number.isFinite(value)) {
       conditions.push("p.monthly_rent >= ?");
       bindings.push(value);
@@ -60,6 +65,7 @@ properties.get("/", async (c) => {
 
   if (maxRent) {
     const value = Number(maxRent);
+
     if (Number.isFinite(value)) {
       conditions.push("p.monthly_rent <= ?");
       bindings.push(value);
@@ -68,6 +74,7 @@ properties.get("/", async (c) => {
 
   if (bedrooms) {
     const value = Number(bedrooms);
+
     if (Number.isFinite(value)) {
       conditions.push("p.bedrooms >= ?");
       bindings.push(value);
@@ -195,6 +202,20 @@ properties.get("/:id/media", async (c) => {
 properties.post("/", requireAuth, async (c) => {
   const userId = c.get("userId");
 
+  // Creating a property is a listing capability action.
+  const canList = await hasCapability(
+    c.env.DB,
+    userId,
+    "listing"
+  );
+
+  if (!canList) {
+    return c.json(
+      { message: "Listing capability is required" },
+      403
+    );
+  }
+
   const body = await c.req.json<{
     title?: string;
     property_type?: string;
@@ -220,11 +241,17 @@ properties.post("/", requireAuth, async (c) => {
   }>();
 
   if (!body.title?.trim()) {
-    return c.json({ message: "Property title is required" }, 400);
+    return c.json(
+      { message: "Property title is required" },
+      400
+    );
   }
 
   if (!body.city?.trim()) {
-    return c.json({ message: "City is required" }, 400);
+    return c.json(
+      { message: "City is required" },
+      400
+    );
   }
 
   if (!body.monthly_rent || body.monthly_rent <= 0) {
@@ -235,6 +262,7 @@ properties.post("/", requireAuth, async (c) => {
   }
 
   const propertyId = crypto.randomUUID();
+  const verificationId = crypto.randomUUID();
   const now = new Date().toISOString();
 
   await c.env.DB
@@ -306,22 +334,62 @@ properties.post("/", requireAuth, async (c) => {
     )
     .run();
 
+  // Every newly created property enters the verification workflow.
+  await c.env.DB
+    .prepare(`
+      INSERT INTO property_verifications (
+        id,
+        property_id,
+        status,
+        created_date,
+        updated_date
+      )
+      VALUES (
+        ?,
+        ?,
+        'unverified',
+        ?,
+        ?
+      )
+    `)
+    .bind(
+      verificationId,
+      propertyId,
+      now,
+      now
+    )
+    .run();
+
+  // Do NOT create approved authority here.
+  // Property authority must go through the evidence/review flow.
+
   const property = await c.env.DB
-    .prepare("SELECT * FROM properties WHERE id = ?")
+    .prepare(`
+      SELECT *
+      FROM properties
+      WHERE id = ?
+    `)
     .bind(propertyId)
     .first();
 
-  return c.json(property, 201);
+  return c.json(
+    {
+      data: property,
+    },
+    201
+  );
 });
 
-// PROTECTED: property update — owner only
+// PROTECTED: property update
 properties.patch("/:id", requireAuth, async (c) => {
   const userId = c.get("userId");
   const propertyId = c.req.param("id");
 
   const existing = await c.env.DB
     .prepare(`
-      SELECT id, created_by_id
+      SELECT
+        id,
+        created_by_id
       FROM properties
       WHERE id = ?
       LIMIT 1
@@ -333,11 +401,27 @@ properties.patch("/:id", requireAuth, async (c) => {
     }>();
 
   if (!existing) {
-    return c.json({ message: "Property not found" }, 404);
+    return c.json(
+      { message: "Property not found" },
+      404
+    );
   }
 
-  if (existing.created_by_id !== userId) {
-    return c.json({ message: "Forbidden" }, 403);
+  // Authority is the source of truth for property management.
+  const authorized = await hasApprovedAuthority(
+    c.env.DB,
+    userId,
+    propertyId
+  );
+
+  if (!authorized) {
+    return c.json(
+      {
+        message:
+          "Approved property authority is required",
+      },
+      403
+    );
   }
 
   const body = await c.req.json<{
@@ -367,33 +451,66 @@ properties.patch("/:id", requireAuth, async (c) => {
   const fields: string[] = [];
   const values: unknown[] = [];
 
-  const add = (field: string, value: unknown) => {
+  const add = (
+    field: string,
+    value: unknown
+  ) => {
     fields.push(`${field} = ?`);
     values.push(value);
   };
 
   if (body.title !== undefined) {
-    add("title", body.title.trim());
+    const title = body.title.trim();
+
+    if (!title) {
+      return c.json(
+        { message: "Property title is required" },
+        400
+      );
+    }
+
+    add("title", title);
   }
 
   if (body.property_type !== undefined) {
-    add("property_type", body.property_type.trim());
+    add(
+      "property_type",
+      body.property_type.trim()
+    );
   }
 
   if (body.description !== undefined) {
-    add("description", body.description.trim());
+    add(
+      "description",
+      body.description.trim()
+    );
   }
 
   if (body.address !== undefined) {
-    add("address", body.address.trim());
+    add(
+      "address",
+      body.address.trim()
+    );
   }
 
   if (body.city !== undefined) {
-    add("city", body.city.trim());
+    const city = body.city.trim();
+
+    if (!city) {
+      return c.json(
+        { message: "City is required" },
+        400
+      );
+    }
+
+    add("city", city);
   }
 
   if (body.suburb !== undefined) {
-    add("suburb", body.suburb.trim());
+    add(
+      "suburb",
+      body.suburb.trim()
+    );
   }
 
   if (body.bedrooms !== undefined) {
@@ -407,12 +524,18 @@ properties.patch("/:id", requireAuth, async (c) => {
   if (body.monthly_rent !== undefined) {
     if (body.monthly_rent <= 0) {
       return c.json(
-        { message: "Monthly rent must be greater than zero" },
+        {
+          message:
+            "Monthly rent must be greater than zero",
+        },
         400
       );
     }
 
-    add("monthly_rent", body.monthly_rent);
+    add(
+      "monthly_rent",
+      body.monthly_rent
+    );
   }
 
   if (body.deposit !== undefined) {
@@ -420,31 +543,52 @@ properties.patch("/:id", requireAuth, async (c) => {
   }
 
   if (body.currency !== undefined) {
-    add("currency", body.currency.trim());
+    add(
+      "currency",
+      body.currency.trim()
+    );
   }
 
   if (body.furnished !== undefined) {
-    add("furnished", body.furnished ? 1 : 0);
+    add(
+      "furnished",
+      body.furnished ? 1 : 0
+    );
   }
 
   if (body.pets_allowed !== undefined) {
-    add("pets_allowed", body.pets_allowed ? 1 : 0);
+    add(
+      "pets_allowed",
+      body.pets_allowed ? 1 : 0
+    );
   }
 
   if (body.gated !== undefined) {
-    add("gated", body.gated ? 1 : 0);
+    add(
+      "gated",
+      body.gated ? 1 : 0
+    );
   }
 
   if (body.utilities_included !== undefined) {
-    add("utilities_included", body.utilities_included.trim());
+    add(
+      "utilities_included",
+      body.utilities_included.trim()
+    );
   }
 
   if (body.security_features !== undefined) {
-    add("security_features", body.security_features.trim());
+    add(
+      "security_features",
+      body.security_features.trim()
+    );
   }
 
   if (body.rules !== undefined) {
-    add("rules", body.rules.trim());
+    add(
+      "rules",
+      body.rules.trim()
+    );
   }
 
   if (body.latitude !== undefined) {
@@ -456,19 +600,34 @@ properties.patch("/:id", requireAuth, async (c) => {
   }
 
   if (body.location_precision !== undefined) {
-    add("location_precision", body.location_precision.trim());
+    add(
+      "location_precision",
+      body.location_precision.trim()
+    );
   }
 
   if (body.video_url !== undefined) {
-    add("video_url", body.video_url.trim() || null);
-    add("media_updated_at", new Date().toISOString());
+    const videoUrl =
+      body.video_url.trim() || null;
+
+    add("video_url", videoUrl);
+    add(
+      "media_updated_at",
+      new Date().toISOString()
+    );
   }
 
   if (fields.length === 0) {
-    return c.json({ message: "No fields to update" }, 400);
+    return c.json(
+      { message: "No fields to update" },
+      400
+    );
   }
 
-  add("updated_date", new Date().toISOString());
+  add(
+    "updated_date",
+    new Date().toISOString()
+  );
 
   values.push(propertyId);
 
@@ -482,21 +641,27 @@ properties.patch("/:id", requireAuth, async (c) => {
     .run();
 
   const updated = await c.env.DB
-    .prepare("SELECT * FROM properties WHERE id = ?")
+    .prepare(`
+      SELECT *
+      FROM properties
+      WHERE id = ?
+    `)
     .bind(propertyId)
     .first();
 
-  return c.json({ data: updated });
+  return c.json({
+    data: updated,
+  });
 });
 
-// PROTECTED: property deletion — owner only
+// PROTECTED: property deletion
 properties.delete("/:id", requireAuth, async (c) => {
   const userId = c.get("userId");
   const propertyId = c.req.param("id");
 
   const existing = await c.env.DB
     .prepare(`
-      SELECT id, created_by_id
+      SELECT id
       FROM properties
       WHERE id = ?
       LIMIT 1
@@ -504,19 +669,36 @@ properties.delete("/:id", requireAuth, async (c) => {
     .bind(propertyId)
     .first<{
       id: string;
-      created_by_id: string;
     }>();
 
   if (!existing) {
-    return c.json({ message: "Property not found" }, 404);
+    return c.json(
+      { message: "Property not found" },
+      404
+    );
   }
 
-  if (existing.created_by_id !== userId) {
-    return c.json({ message: "Forbidden" }, 403);
+  const authorized = await hasApprovedAuthority(
+    c.env.DB,
+    userId,
+    propertyId
+  );
+
+  if (!authorized) {
+    return c.json(
+      {
+        message:
+          "Approved property authority is required",
+      },
+      403
+    );
   }
 
   await c.env.DB
-    .prepare("DELETE FROM properties WHERE id = ?")
+    .prepare(`
+      DELETE FROM properties
+      WHERE id = ?
+    `)
     .bind(propertyId)
     .run();
 

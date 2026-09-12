@@ -217,7 +217,12 @@ const profiles = {
   async me() {
     try {
       const result = await request('/profiles/me');
-      return normalizeEntity(unwrap(result));
+      const entity = normalizeEntity(unwrap(result));
+      if (entity) {
+        entity.capabilities = result.capabilities || [];
+        entity.verification = result.verification || null;
+      }
+      return entity;
     } catch (err) {
       if (err.status === 404) return null;
       throw err;
@@ -234,7 +239,9 @@ const profiles = {
       method: 'PATCH',
       body: JSON.stringify(data),
     });
-    return normalizeEntity(unwrap(result));
+    const entity = normalizeEntity(unwrap(result));
+    if (entity) entity.capabilities = result.capabilities || [];
+    return entity;
   },
   async getPublic(userId) {
     try {
@@ -244,6 +251,57 @@ const profiles = {
       if (err.status === 404) return null;
       throw err;
     }
+  },
+};
+
+const capabilities = {
+  async mine() {
+    const result = await request('/capabilities/me');
+    return result?.data || [];
+  },
+  async grant(capability) {
+    const result = await request('/capabilities', {
+      method: 'POST',
+      body: JSON.stringify({ capability }),
+    });
+    return result?.data || [];
+  },
+  async revoke(capability) {
+    return request(`/capabilities/${encodeURIComponent(capability)}`, {
+      method: 'DELETE',
+    });
+  },
+};
+
+const identityVerification = {
+  async me() {
+    const result = await request('/identity-verification/me');
+    return result?.data || { status: 'unverified' };
+  },
+  async submit(evidenceDocumentId) {
+    const result = await request('/identity-verification', {
+      method: 'POST',
+      body: JSON.stringify({ evidence_document_id: evidenceDocumentId }),
+    });
+    return result?.data;
+  },
+};
+
+const propertyAuthority = {
+  async mine() {
+    const result = await request('/property-authority');
+    return result?.data || [];
+  },
+  async forProperty(propertyId) {
+    const result = await request(`/property-authority?property_id=${encodeURIComponent(propertyId)}`);
+    return result?.data || null;
+  },
+  async submit(propertyId, evidenceDocumentId) {
+    const result = await request('/property-authority', {
+      method: 'POST',
+      body: JSON.stringify({ property_id: propertyId, evidence_document_id: evidenceDocumentId }),
+    });
+    return result?.data;
   },
 };
 
@@ -441,4 +499,7 @@ export const zimrent = {
   savedProperties,
   conversations,
   viewings,
+  capabilities,
+  identityVerification,
+  propertyAuthority,
 };

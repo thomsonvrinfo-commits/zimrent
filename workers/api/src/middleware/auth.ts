@@ -36,10 +36,33 @@ export const requireAuth = createMiddleware<Env>(async (c, next) => {
     c.set("userId", auth.userId);
     c.set("userEmail", auth.email);
     c.set("userRole", auth.role);
-    c.set("user", { id: auth.userId, email: auth.email, role: auth.role });
+    c.set("user", {
+      id: auth.userId,
+      email: auth.email,
+      role: auth.role,
+    });
 
     await next();
   } catch {
     return c.json({ message: "Unauthorized" }, 401);
   }
+});
+
+export const requireAdmin = createMiddleware<Env>(async (c, next) => {
+  const userId = c.get("userId");
+
+  const user = await c.env.DB
+    .prepare(`
+      SELECT is_admin
+      FROM users
+      WHERE id = ?
+    `)
+    .bind(userId)
+    .first<{ is_admin: number }>();
+
+  if (!user || user.is_admin !== 1) {
+    return c.json({ message: "Forbidden" }, 403);
+  }
+
+  await next();
 });

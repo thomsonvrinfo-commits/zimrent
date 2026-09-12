@@ -16,6 +16,10 @@ import sendMessage from "./routes/messages/send";
 import viewings from "./routes/viewings";
 import profiles from "./routes/profiles";
 import savedProperties from "./routes/saved-properties";
+import capabilities from "./routes/capabilities";
+import identityVerification from "./routes/verification/identity";
+import propertyAuthority from "./routes/verification/propertyAuthority";
+import adminVerification from "./routes/admin/verification";
 
 
 type Env = {
@@ -92,5 +96,9 @@ app.route("/profiles", profiles);
 app.route("/saved-properties", savedProperties);
 app.route("/uploads", uploads);
 app.route("/media", media);
+app.route("/capabilities", capabilities);
+app.route("/identity-verification", identityVerification);
+app.route("/property-authority", propertyAuthority);
+app.route("/admin", adminVerification);
 
 export default app;

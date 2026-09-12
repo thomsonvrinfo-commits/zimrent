@@ -1,5 +1,9 @@
 import { Hono } from "hono";
 import { requireAuth } from "../../middleware/auth";
+import {
+  hasCapability,
+  hasApprovedAuthority,
+} from "../../services/capabilities";
 
 type Env = {
   Bindings: {
@@ -19,6 +23,20 @@ create.use("/*", requireAuth);
 create.post("/", async (c) => {
   const userId = c.get("userId");
 
+  // Creating a listing requires the listing capability.
+  const canList = await hasCapability(
+    c.env.DB,
+    userId,
+    "listing"
+  );
+
+  if (!canList) {
+    return c.json(
+      { message: "Listing capability is required" },
+      403
+    );
+  }
+
   const body = await c.req.json<{
     property_id?: string;
     available_from?: string;
@@ -27,14 +45,20 @@ create.post("/", async (c) => {
   const propertyId = body.property_id?.trim();
 
   if (!propertyId) {
-    return c.json({ message: "property_id is required" }, 400);
+    return c.json(
+      { message: "property_id is required" },
+      400
+    );
   }
 
   const property = await c.env.DB
     .prepare(`
-      SELECT id, created_by_id
+      SELECT
+        id,
+        created_by_id
       FROM properties
       WHERE id = ?
+      LIMIT 1
     `)
     .bind(propertyId)
     .first<{
@@ -43,19 +67,34 @@ create.post("/", async (c) => {
     }>();
 
   if (!property) {
-    return c.json({ message: "Property not found" }, 404);
+    return c.json(
+      { message: "Property not found" },
+      404
+    );
   }
 
-  if (property.created_by_id !== userId) {
+  // Authority is the source of truth for managing this property.
+  const authorized = await hasApprovedAuthority(
+    c.env.DB,
+    userId,
+    propertyId
+  );
+
+  if (!authorized) {
     return c.json(
-      { message: "You do not own this property" },
+      {
+        message:
+          "Approved property authority is required",
+      },
       403
     );
   }
 
   const existing = await c.env.DB
     .prepare(`
-      SELECT id, status
+      SELECT
+        id,
+        status
       FROM listings
       WHERE property_id = ?
       LIMIT 1
@@ -69,7 +108,8 @@ create.post("/", async (c) => {
   if (existing) {
     return c.json(
       {
-        message: "A listing already exists for this property",
+        message:
+          "A listing already exists for this property",
         listing: existing,
       },
       409
@@ -98,7 +138,7 @@ create.post("/", async (c) => {
       userId,
       propertyId,
       "pending_verification",
-       null,
+      null,
       body.available_from?.trim() || null,
       now,
       now
@@ -114,7 +154,12 @@ create.post("/", async (c) => {
     .bind(listingId)
     .first();
 
-  return c.json(listing, 201);
+  return c.json(
+    {
+      data: listing,
+    },
+    201
+  );
 });
 
 export default create;

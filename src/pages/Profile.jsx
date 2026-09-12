@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -25,7 +26,6 @@ import {
   Phone,
   MapPin,
   ShieldCheck,
-  Star,
   Home,
   Loader2,
   CheckCircle2,
@@ -93,20 +93,46 @@ function getDisplayName(profile, user) {
   );
 }
 
-function getRole(profile, user) {
-  return user?.role || profile?.data?.role || "tenant";
-}
-
 export default function Profile() {
   const { id } = useParams();
   const { user } = useAuth();
-  const { profile: myProfile, loading, refresh } = useProfile();
+
+  const {
+    profile: myProfile,
+    loading,
+    refresh,
+    capabilities
+  } = useProfile();
 
   const [viewingProfile, setViewingProfile] = useState(null);
   const [viewingLoading, setViewingLoading] = useState(false);
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [togglingCapability, setTogglingCapability] = useState(null);
+
+  const toggleCapability = async (capability, isEnabled) => {
+    if (isEnabled && capabilities.length === 1) {
+      alert("You need at least one ZimRent capability enabled.");
+      return;
+    }
+
+    setTogglingCapability(capability);
+
+    try {
+      if (isEnabled) {
+        await zimrent.capabilities.revoke(capability);
+      } else {
+        await zimrent.capabilities.grant(capability);
+      }
+
+      await refresh();
+    } catch (e) {
+      alert(e.message || "Failed to update capability.");
+    } finally {
+      setTogglingCapability(null);
+    }
+  };
 
   const isOwnProfile =
     !id ||
@@ -149,7 +175,7 @@ export default function Profile() {
 
       setForm({
         full_name: getDisplayName(myProfile, user),
-        role: getRole(myProfile, user),
+        capabilities: myProfile.capabilities || [],
         phone: myProfile.data?.phone || "",
         bio: myProfile.data?.bio || "",
         ...preferences
@@ -161,7 +187,7 @@ export default function Profile() {
     if (!loading) {
       setForm({
         full_name: getDisplayName(null, user),
-        role: user?.role || "tenant",
+        capabilities: [],
         phone: "",
         bio: "",
         ...DEFAULT_PREFERENCES
@@ -178,6 +204,15 @@ export default function Profile() {
 
   const handleSave = async () => {
     if (!form) return;
+
+    const selectedCapabilities = [
+      ...new Set(form.capabilities || [])
+    ];
+
+    if (!myProfile && selectedCapabilities.length === 0) {
+      alert("Choose at least one way to use ZimRent.");
+      return;
+    }
 
     setSaving(true);
 
@@ -196,17 +231,20 @@ export default function Profile() {
       };
 
       const profileData = {
-  display_name: form.full_name?.trim() || null,
-  phone: form.phone?.trim() || null,
-  bio: form.bio?.trim() || null,
-  preferences_json: JSON.stringify(preferences),
-  role: form.role || "tenant"
-};
+        display_name: form.full_name?.trim() || "",
+        phone: form.phone?.trim() || "",
+        bio: form.bio?.trim() || "",
+        preferences_json: JSON.stringify(preferences)
+      };
 
       if (myProfile) {
         await zimrent.profiles.update(profileData);
       } else {
         await zimrent.profiles.createIfMissing(profileData);
+
+        for (const capability of selectedCapabilities) {
+          await zimrent.capabilities.grant(capability);
+        }
       }
 
       await refresh();
@@ -291,7 +329,23 @@ export default function Profile() {
 
   const showOnboarding = !myProfile && !editing;
   const profileData = myProfile?.data;
-  const currentRole = getRole(myProfile, user);
+
+  const identityVerification =
+    myProfile?.verification?.identity || null;
+
+  const identityStatus =
+    identityVerification?.status ||
+    profileData?.identity_status ||
+    "unverified";
+
+  const isIdentityVerified =
+    identityStatus === "verified" ||
+    identityStatus === "identity_verified";
+
+  const isIdentityPending =
+    identityStatus === "pending" ||
+    identityStatus === "identity_pending" ||
+    identityStatus === "verification_review";
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-8">
@@ -332,47 +386,51 @@ export default function Profile() {
             {showOnboarding && (
               <div>
                 <Label className="text-base font-semibold">
-                  I want to...
+                  How will you use ZimRent?
                 </Label>
 
-                <div className="grid grid-cols-2 gap-3 mt-3">
-                  {[
-                    {
-                      value: "tenant",
-                      label: "Find a place to rent",
-                      icon: Home
-                    },
-                    {
-                      value: "owner",
-                      label: "List my properties",
-                      icon: Building2
-                    }
-                  ].map((opt) => (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      onClick={() =>
-                        updateForm({ role: opt.value })
-                      }
-                      className={`p-4 rounded-xl border-2 text-left transition-all ${
-                        form?.role === opt.value
-                          ? "border-primary bg-primary/5"
-                          : "border-border hover:border-primary/30"
-                      }`}
-                    >
-                      <opt.icon
-                        className={`w-5 h-5 mb-2 ${
-                          form?.role === opt.value
-                            ? "text-primary"
-                            : "text-muted-foreground"
-                        }`}
-                      />
+                <p className="text-sm text-muted-foreground mt-1">
+                  You can choose one or both.
+                </p>
 
-                      <p className="text-sm font-medium">
-                        {opt.label}
-                      </p>
-                    </button>
-                  ))}
+                <div className="space-y-3 mt-3">
+                  <CapabilityChoice
+                    selected={form?.capabilities?.includes("renting")}
+                    icon={Home}
+                    title="Renting"
+                    description="Find and rent a home"
+                    onClick={() =>
+                      updateForm({
+                        capabilities: form?.capabilities?.includes("renting")
+                          ? form.capabilities.filter(
+                              (c) => c !== "renting"
+                            )
+                          : [
+                              ...(form?.capabilities || []),
+                              "renting"
+                            ]
+                      })
+                    }
+                  />
+
+                  <CapabilityChoice
+                    selected={form?.capabilities?.includes("listing")}
+                    icon={Building2}
+                    title="Listing properties"
+                    description="List and manage your properties"
+                    onClick={() =>
+                      updateForm({
+                        capabilities: form?.capabilities?.includes("listing")
+                          ? form.capabilities.filter(
+                              (c) => c !== "listing"
+                            )
+                          : [
+                              ...(form?.capabilities || []),
+                              "listing"
+                            ]
+                      })
+                    }
+                  />
                 </div>
               </div>
             )}
@@ -445,7 +503,7 @@ export default function Profile() {
               />
             </div>
 
-            {form?.role === "tenant" && (
+            {form?.capabilities?.includes("renting") && (
               <div className="pt-4 border-t border-border space-y-4">
                 <p className="font-semibold text-sm flex items-center gap-2">
                   <Heart className="w-4 h-4 text-primary" />
@@ -534,7 +592,9 @@ export default function Profile() {
                       min="0"
                       value={form?.budget || ""}
                       onChange={(e) =>
-                        updateForm({ budget: e.target.value })
+                        updateForm({
+                          budget: e.target.value
+                        })
                       }
                       className="mt-1.5"
                       placeholder="e.g. 500"
@@ -749,14 +809,21 @@ export default function Profile() {
                       "ZimRent user"}
                   </h2>
 
-                  <p className="text-sm text-muted-foreground capitalize">
-                    {currentRole}
-                  </p>
+                  <div className="flex flex-wrap gap-2 mt-1">
+                    {capabilities.map((capability) => (
+                      <span
+                        key={capability}
+                        className="text-xs px-2.5 py-1 rounded-full bg-primary/10 text-primary font-medium"
+                      >
+                        {capability === "listing"
+                          ? "Listing properties"
+                          : "Renting"}
+                      </span>
+                    ))}
+                  </div>
                 </div>
 
-                <IdentityBadge
-                  status={profileData?.identity_status}
-                />
+                <IdentityBadge status={identityStatus} />
               </div>
 
               <div className="grid grid-cols-2 gap-4 mt-5 pt-5 border-t border-border text-sm">
@@ -798,6 +865,49 @@ export default function Profile() {
           <Card className="border-border">
             <CardHeader>
               <CardTitle className="text-base">
+                What you do on ZimRent
+              </CardTitle>
+            </CardHeader>
+
+            <CardContent className="space-y-4">
+              <CapabilitySwitch
+                title="Renting"
+                description="Search, save properties, message listers, apply"
+                checked={capabilities.includes("renting")}
+                disabled={togglingCapability === "renting"}
+                onCheckedChange={() =>
+                  toggleCapability(
+                    "renting",
+                    capabilities.includes("renting")
+                  )
+                }
+              />
+
+              <CapabilitySwitch
+                title="Listing properties"
+                description="Create properties, manage listings, receive enquiries"
+                checked={capabilities.includes("listing")}
+                disabled={togglingCapability === "listing"}
+                onCheckedChange={() =>
+                  toggleCapability(
+                    "listing",
+                    capabilities.includes("listing")
+                  )
+                }
+                bordered
+              />
+
+              <p className="text-xs text-muted-foreground pt-2 border-t border-border">
+                Turning on "Listing properties" does not authorize you to list
+                any specific property. Each property requires its own authority
+                verification before you can publish a listing.
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card className="border-border">
+            <CardHeader>
+              <CardTitle className="text-base">
                 Verification center
               </CardTitle>
             </CardHeader>
@@ -825,53 +935,21 @@ export default function Profile() {
 
               <VerificationItem
                 label="Identity verification"
-                done={
-                  profileData?.identity_status ===
-                  "identity_verified"
-                }
-                pending={
-                  profileData?.identity_status ===
-                    "identity_pending" ||
-                  profileData?.identity_status ===
-                    "verification_review"
-                }
+                done={isIdentityVerified}
+                pending={isIdentityPending}
                 description={
-                  profileData?.identity_status ===
-                  "identity_verified"
+                  isIdentityVerified
                     ? "Your identity has been verified."
-                    : profileData?.identity_status ===
-                        "identity_pending" ||
-                      profileData?.identity_status ===
-                        "verification_review"
-                    ? "Your verification is under review."
-                    : profileData?.identity_status ===
-                      "verification_failed"
-                    ? "Verification could not be completed."
+                    : isIdentityPending
+                    ? "Your identity verification is under review."
                     : "Identity verification will be available through the verification process."
                 }
               />
 
-              {(currentRole === "owner" ||
-                currentRole === "agent") && (
+              {capabilities.includes("listing") && (
                 <VerificationItem
-                  label="Authority verification"
-                  done={
-                    profileData?.authority_status ===
-                    "verified"
-                  }
-                  pending={
-                    profileData?.authority_status ===
-                    "pending"
-                  }
-                  description={
-                    profileData?.authority_status ===
-                    "verified"
-                      ? "Your authority to list properties has been verified."
-                      : profileData?.authority_status ===
-                        "pending"
-                      ? "Your authority evidence is under review."
-                      : "Authority verification confirms you are authorised to list properties."
-                  }
+                  label="Property authority"
+                  description="Authority is verified separately for each property. A listing capability alone does not prove ownership or authorization."
                 />
               )}
 
@@ -879,20 +957,17 @@ export default function Profile() {
                 <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
 
                 <p>
-                  Identity verification confirms a person's identity
-                  has been checked. Authority verification confirms
-                  they are authorised to list a specific property.
-                  A verified identity alone does not make someone
-                  eligible to collect payments.
+                  Identity verification confirms a person's identity has been
+                  checked. Property authority verification confirms that a user
+                  is authorized to manage a specific property.
                 </p>
               </div>
             </CardContent>
           </Card>
 
-          {currentRole === "tenant" &&
+          {capabilities.includes("renting") &&
             (() => {
-              const preferences =
-                parsePreferences(myProfile);
+              const preferences = parsePreferences(myProfile);
 
               return (
                 (preferences.employment_status ||
@@ -911,9 +986,7 @@ export default function Profile() {
                           <Preference
                             icon={Briefcase}
                             label="Employment"
-                            value={
-                              preferences.employment_status
-                            }
+                            value={preferences.employment_status}
                           />
                         )}
 
@@ -921,9 +994,7 @@ export default function Profile() {
                           <Preference
                             icon={Wallet}
                             label="Income range"
-                            value={
-                              preferences.income_range
-                            }
+                            value={preferences.income_range}
                           />
                         )}
 
@@ -948,9 +1019,7 @@ export default function Profile() {
                         {preferences.preferred_locations && (
                           <Preference
                             label="Preferred locations"
-                            value={
-                              preferences.preferred_locations
-                            }
+                            value={preferences.preferred_locations}
                           />
                         )}
 
@@ -1009,10 +1078,83 @@ export default function Profile() {
   );
 }
 
+function CapabilityChoice({
+  selected,
+  icon: Icon,
+  title,
+  description,
+  onClick
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`w-full p-4 rounded-xl border-2 text-left transition-all ${
+        selected
+          ? "border-primary bg-primary/5"
+          : "border-border hover:border-primary/30"
+      }`}
+    >
+      <div className="flex items-center gap-3">
+        <Icon
+          className={`w-5 h-5 ${
+            selected
+              ? "text-primary"
+              : "text-muted-foreground"
+          }`}
+        />
+
+        <div className="flex-1">
+          <p className="text-sm font-medium">{title}</p>
+
+          <p className="text-xs text-muted-foreground mt-0.5">
+            {description}
+          </p>
+        </div>
+
+        {selected && (
+          <CheckCircle2 className="w-5 h-5 text-primary" />
+        )}
+      </div>
+    </button>
+  );
+}
+
+function CapabilitySwitch({
+  title,
+  description,
+  checked,
+  disabled,
+  onCheckedChange,
+  bordered = false
+}) {
+  return (
+    <div
+      className={`flex items-center justify-between ${
+        bordered ? "pt-4 border-t border-border" : ""
+      }`}
+    >
+      <div>
+        <p className="text-sm font-medium">{title}</p>
+
+        <p className="text-xs text-muted-foreground">
+          {description}
+        </p>
+      </div>
+
+      <Switch
+        checked={checked}
+        disabled={disabled}
+        onCheckedChange={onCheckedChange}
+      />
+    </div>
+  );
+}
+
 function VerificationItem({
   label,
-  done,
-  pending,
+  done = false,
+  pending = false,
   description
 }) {
   return (
@@ -1040,6 +1182,7 @@ function VerificationItem({
 
       <div className="flex-1">
         <p className="text-sm font-medium">{label}</p>
+
         <p className="text-xs text-muted-foreground mt-0.5">
           {description}
         </p>
