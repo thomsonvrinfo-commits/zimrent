@@ -210,6 +210,13 @@ export default function AddProperty() {
       return;
     }
 
+    if (!(form.authority_document_file instanceof File)) {
+      alert(
+        "Please upload evidence of your authority to list this property (title deed, lease agreement, or agent mandate) before submitting."
+      );
+      return;
+    }
+
     setSaving(true);
 
     try {
@@ -261,18 +268,6 @@ export default function AddProperty() {
 
       /*
        * STEP 2
-       * Create the listing.
-       *
-       * The backend automatically creates it as
-       * pending_verification.
-       */
-      await zimrent.listings.create({
-        property_id: property.id,
-        available_from: form.available_from || null,
-      });
-
-      /*
-       * STEP 3
        * Upload property photos to R2.
        */
       for (const photo of form.photos) {
@@ -285,24 +280,47 @@ export default function AddProperty() {
       }
 
       /*
-       * STEP 4
-       * Upload authority evidence privately.
+       * STEP 3
+       * Upload authority evidence privately. This document's id is
+       * required by the property-authority submission in step 4.
        */
-      if (form.authority_document_file instanceof File) {
+      const authorityDocument =
         await zimrent.integrations.Core.UploadPrivateFile({
           file: form.authority_document_file,
           property_id: property.id,
+          document_type: "authority",
         });
+
+      const evidenceDocumentId = authorityDocument?.id;
+
+      if (!evidenceDocumentId) {
+        throw new Error(
+          "Authority evidence upload did not return a document id."
+        );
       }
 
       /*
-       * STEP 5
-       * No client-side status transition.
+       * STEP 4
+       * Submit property authority for review. Approval happens
+       * separately through the admin verification flow — this call
+       * does not create a listing.
        *
-       * The listing was already created as
-       * pending_verification by the backend.
+       * Listing creation now correctly requires approved authority
+       * (see hasApprovedAuthority in the listings/create endpoint),
+       * so it must never be attempted here.
        */
-      navigate("/my-properties?published=1");
+      await zimrent.propertyAuthority.submit(
+        property.id,
+        evidenceDocumentId
+      );
+
+      /*
+       * STEP 5
+       * Stop. No listing creation happens in this flow. The owner
+       * creates the listing from My Properties once authority is
+       * approved.
+       */
+      navigate("/my-properties?authority_pending=1");
     } catch (error) {
       console.error("Property submission failed:", error);
 
@@ -1133,9 +1151,10 @@ export default function AddProperty() {
             </div>
 
             <div className="p-3 bg-muted rounded-lg text-xs text-muted-foreground">
-              Your listing will be submitted for verification.
-              Once approved by our team, it will appear on the
-              marketplace.
+              Your property and authority evidence will be
+              submitted for review. Once your authority is
+              approved, you'll be able to publish it as a listing
+              from My Properties.
             </div>
 
             <div className="flex gap-2">
@@ -1272,13 +1291,13 @@ export default function AddProperty() {
               <div>
                 <Label className="flex items-center gap-1.5">
                   <FileCheck className="w-4 h-4" />
-                  Upload evidence document (optional)
+                  Upload evidence document
                 </Label>
 
                 <p className="text-xs text-muted-foreground mb-2">
-                  Title deed, lease agreement, or agent mandate.
-                  Stored privately — only you and admins can
-                  access it.
+                  Required. Title deed, lease agreement, or agent
+                  mandate. Stored privately — only you and admins
+                  can access it.
                 </p>
 
                 <input

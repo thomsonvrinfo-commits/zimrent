@@ -121,6 +121,49 @@ properties.get("/", async (c) => {
   });
 });
 
+// PROTECTED: the authenticated user's own properties, regardless of
+// listing status. Distinct from the public "/" route above, which only
+// returns properties that already have an active listing — a property
+// awaiting authority approval would never appear there. Registered before
+// "/:id" so the literal "mine" segment isn't swallowed by the :id param.
+//
+// Also joins in the caller's own property_authority status per property
+// (aliased to my_authority_status, since properties already has its own
+// legacy authority_status column) so the frontend can show it.
+properties.get("/mine", requireAuth, async (c) => {
+  const userId = c.get("userId");
+
+  const sql = `
+    SELECT
+      p.*,
+      l.id AS listing_id,
+      l.status AS listing_status,
+      l.available_from,
+      l.availability_confirmed_at,
+      pa.status AS my_authority_status,
+      pa.id AS my_authority_id,
+      pa.reviewed_at AS my_authority_reviewed_at
+    FROM properties p
+    LEFT JOIN listings l
+      ON l.property_id = p.id
+    LEFT JOIN property_authority pa
+      ON pa.property_id = p.id
+     AND pa.user_id = ?
+    WHERE p.created_by_id = ?
+    ORDER BY p.created_date DESC
+  `;
+
+  const result = await c.env.DB
+    .prepare(sql)
+    .bind(userId, userId)
+    .all();
+
+  return c.json({
+    data: result.results,
+    count: result.results.length,
+  });
+});
+
 // PUBLIC: property detail
 properties.get("/:id", async (c) => {
   const propertyId = c.req.param("id");

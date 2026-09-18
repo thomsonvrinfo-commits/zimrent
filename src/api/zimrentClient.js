@@ -155,7 +155,51 @@ function splitPropertyListingRow(row) {
   return { property, listing };
 }
 
+// GET /properties/mine returns one joined row per owned property (property
+// columns + listing_id/listing_status/available_from/availability_confirmed_at
+// + my_authority_status/my_authority_id/my_authority_reviewed_at for the
+// caller's own property_authority record, if any). Split that into the
+// { property, listing, authorityStatus } shape MyProperties consumes.
+function splitOwnPropertyRow(row) {
+  if (!row) return { property: null, listing: null, authorityStatus: 'not_submitted', authorityId: null, authorityReviewedAt: null };
+  const {
+    listing_id, listing_status, available_from, availability_confirmed_at,
+    my_authority_status, my_authority_id, my_authority_reviewed_at,
+    ...propertyFields
+  } = row;
+  const property = normalizeEntity(propertyFields);
+  const listing = listing_id
+    ? normalizeEntity({
+      id: listing_id,
+      property_id: propertyFields.id,
+      created_by_id: propertyFields.created_by_id,
+      status: listing_status,
+      available_from,
+      availability_confirmed_at,
+      created_date: propertyFields.created_date,
+      updated_date: propertyFields.updated_date,
+    })
+    : null;
+  return {
+    property,
+    listing,
+    authorityStatus: my_authority_status || 'not_submitted',
+    authorityId: my_authority_id || null,
+    authorityReviewedAt: my_authority_reviewed_at || null,
+  };
+}
+
 const properties = {
+  // Every property the logged-in user owns, regardless of whether it has
+  // a listing yet. Unlike search()/get() (GET /properties), which only
+  // return properties with an active listing, this hits the protected
+  // GET /properties/mine endpoint so an owner can see a property that's
+  // still awaiting authority approval.
+  async mine() {
+    const result = await request('/properties/mine');
+    const rows = Array.isArray(result?.data) ? result.data : [];
+    return rows.map(splitOwnPropertyRow);
+  },
   async search(filters = {}, limit) {
     const params = new URLSearchParams();
     for (const [key, value] of Object.entries(filters)) {
@@ -304,6 +348,70 @@ const propertyAuthority = {
     return result?.data;
   },
 };
+
+  const admin = {
+    async identityQueue() {
+      const result = await request('/admin/verification/identity');
+      return Array.isArray(result?.data) ? result.data : [];
+    },
+    async propertyQueue() {
+      const result = await request('/admin/verification/properties');
+      return Array.isArray(result?.data) ? result.data : [];
+    },
+    async authorityQueue() {
+      const result = await request('/admin/verification/authority');
+      return Array.isArray(result?.data) ? result.data : [];
+    },
+    async reviewIdentity(id, status) {
+      const result = await request(`/admin/verification/identity/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status }),
+      });
+      return result?.data;
+    },
+    async reviewProperty(id, status, notes) {
+      const body = notes != null ? { status, notes } : { status };
+      const result = await request(`/admin/verification/properties/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      });
+      return result?.data;
+    },
+    async reviewAuthority(id, status) {
+      const result = await request(`/admin/verification/authority/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status }),
+      });
+      return result?.data;
+    },
+    async documentUrl(kind, documentId) {
+      const headers = new Headers();
+      const token = getToken();
+      if (token) headers.set('Authorization', `Bearer ${token}`);
+
+      const response = await fetch(
+        `${API_BASE_URL}/media/document/${encodeURIComponent(kind)}/${encodeURIComponent(documentId)}`,
+        { headers, credentials: 'include' }
+      );
+
+      if (!response.ok) {
+        let message = response.statusText || 'Failed to load document';
+        try {
+          const payload = await response.json();
+          message = payload?.message || message;
+        } catch {
+          // Non-JSON error body — fall back to statusText above.
+        }
+        const error = new Error(message);
+        error.status = response.status;
+        throw error;
+      }
+
+      const blob = await response.blob();
+      return URL.createObjectURL(blob);
+    },
+  };
+
 
 const savedProperties = {
   async mine() {
@@ -459,11 +567,12 @@ const integrations = {
       }));
     },
 
-    async UploadPrivateFile({ file, property_id }) {
+    async UploadPrivateFile({ file, property_id, document_type = 'authority' }) {
       const form = new FormData();
       form.append('file', file);
-      form.append('property_id', property_id);
+      if (property_id) form.append('property_id', property_id);
       form.append('kind', 'document');
+      form.append('document_type', document_type);
 
       return unwrap(await request('/uploads', {
         method: 'POST',
@@ -502,4 +611,5 @@ export const zimrent = {
   capabilities,
   identityVerification,
   propertyAuthority,
+  admin,
 };

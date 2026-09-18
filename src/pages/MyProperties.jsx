@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { zimrent } from "@/api/zimrentClient";
 import { useAuth } from "@/lib/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,8 @@ import {
   RefreshCw,
   Eye,
   EyeOff,
-  Loader2
+  Loader2,
+  Megaphone
 } from "lucide-react";
 import StateBadge from "@/components/StateBadge";
 import { PropertyVerificationBadge } from "@/components/VerificationBadge";
@@ -26,13 +27,45 @@ import {
   PROPERTY_TYPES
 } from "@/lib/rental-utils";
 
+// Property authority is a separate concept from listing status (see the
+// Master Brief §5/§8) — a property can exist, and be seen here, long
+// before it has a listing at all. This local map is only for the badge
+// shown on this page; it deliberately doesn't touch the shared
+// LISTING_STATUS map in rental-utils.js.
+const AUTHORITY_STATUS = {
+  not_submitted: {
+    label: "Authority not submitted",
+    color: "secondary"
+  },
+  pending: {
+    label: "Authority pending review",
+    color: "warning"
+  },
+  approved: {
+    label: "Authority approved",
+    color: "success"
+  },
+  rejected: {
+    label: "Authority rejected",
+    color: "destructive"
+  },
+  revoked: {
+    label: "Authority revoked",
+    color: "destructive"
+  }
+};
+
 export default function MyProperties() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   const [loading, setLoading] = useState(true);
   const [properties, setProperties] = useState([]);
   const [actionId, setActionId] = useState(null);
+  const [creatingListingId, setCreatingListingId] = useState(null);
+
+  const authorityPending = searchParams.get("authority_pending") === "1";
 
   const loadProperties = async () => {
     if (!user) return;
@@ -40,27 +73,13 @@ export default function MyProperties() {
     setLoading(true);
 
     try {
-      const ownListings = await zimrent.listings.mine();
-
-      const results = await Promise.all(
-        (ownListings || []).map(async (listing) => {
-          try {
-            const result = await zimrent.properties.get(
-              listing.data?.property_id
-            );
-
-            return {
-              property: result?.property || null,
-              listing
-            };
-          } catch {
-            return {
-              property: null,
-              listing
-            };
-          }
-        })
-      );
+      // properties.mine() (GET /properties/mine) returns every property
+      // the user owns regardless of listing status, plus their own
+      // property_authority status per property — unlike listings.mine()
+      // (GET /listings), which only returns properties that already have
+      // a listing and would hide anything still awaiting authority
+      // approval.
+      const results = await zimrent.properties.mine();
 
       setProperties(
         results.filter((item) => item.property)
@@ -93,7 +112,7 @@ export default function MyProperties() {
 
       setProperties((current) =>
         current.map((item) =>
-          item.listing.id === listing.id
+          item.listing?.id === listing.id
             ? {
                 ...item,
                 listing: updated
@@ -122,7 +141,7 @@ export default function MyProperties() {
 
       setProperties((current) =>
         current.map((item) =>
-          item.listing.id === listing.id
+          item.listing?.id === listing.id
             ? {
                 ...item,
                 listing: updated
@@ -137,6 +156,29 @@ export default function MyProperties() {
       );
     } finally {
       setActionId(null);
+    }
+  };
+
+  // Only reachable once authority is approved and no listing exists yet
+  // (see the button's render guard below) — the backend still enforces
+  // hasApprovedAuthority() independently, so this is a UI convenience,
+  // not the source of truth.
+  const createListing = async (property) => {
+    setCreatingListingId(property.id);
+
+    try {
+      await zimrent.listings.create({
+        property_id: property.id
+      });
+
+      await loadProperties();
+    } catch (e) {
+      alert(
+        e.message ||
+          "Unable to create listing. Please try again."
+      );
+    } finally {
+      setCreatingListingId(null);
     }
   };
 
@@ -169,6 +211,14 @@ export default function MyProperties() {
         </Button>
       </div>
 
+      {authorityPending && (
+        <div className="mb-6 p-3 bg-warning/10 border border-warning/20 rounded-lg text-sm text-warning">
+          Property submitted. Your authority evidence is now
+          pending review — you'll be able to create a listing
+          once it's approved.
+        </div>
+      )}
+
       {properties.length === 0 ? (
         <EmptyState
           icon={Building2}
@@ -188,7 +238,7 @@ export default function MyProperties() {
       ) : (
         <div className="space-y-4">
           {properties.map(
-            ({ property, listing }) => {
+            ({ property, listing, authorityStatus }) => {
               const propertyData =
                 property.data || {};
 
@@ -202,8 +252,19 @@ export default function MyProperties() {
                     ]
                   : null;
 
+              const authorityInfo =
+                AUTHORITY_STATUS[authorityStatus] ||
+                AUTHORITY_STATUS.not_submitted;
+
               const busy =
                 actionId === listing?.id;
+
+              const creatingListing =
+                creatingListingId === property.id;
+
+              const canCreateListing =
+                authorityStatus === "approved" &&
+                !listing;
 
               return (
                 <Card
@@ -273,19 +334,27 @@ export default function MyProperties() {
                           </div>
                         </div>
 
-                        {statusInfo && (
+                        <div className="flex flex-col items-end gap-1.5">
                           <StateBadge
-                            status={
-                              listingData.status
-                            }
-                            label={
-                              statusInfo.label
-                            }
-                            color={
-                              statusInfo.color
-                            }
+                            status={authorityStatus}
+                            label={authorityInfo.label}
+                            color={authorityInfo.color}
                           />
-                        )}
+
+                          {statusInfo && (
+                            <StateBadge
+                              status={
+                                listingData.status
+                              }
+                              label={
+                                statusInfo.label
+                              }
+                              color={
+                                statusInfo.color
+                              }
+                            />
+                          )}
+                        </div>
                       </div>
 
                       <div className="flex flex-wrap gap-2 mt-3">
@@ -301,6 +370,25 @@ export default function MyProperties() {
                             View
                           </Link>
                         </Button>
+
+                        {canCreateListing && (
+                          <Button
+                            size="sm"
+                            onClick={() =>
+                              createListing(
+                                property
+                              )
+                            }
+                            disabled={creatingListing}
+                          >
+                            {creatingListing ? (
+                              <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                            ) : (
+                              <Megaphone className="w-3.5 h-3.5 mr-1.5" />
+                            )}
+                            Create listing
+                          </Button>
+                        )}
 
                         {listing &&
                           listingData.status ===

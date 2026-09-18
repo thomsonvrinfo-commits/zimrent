@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { requireAuth } from "../middleware/auth";
+import { requireAuth, requireAdmin } from "../middleware/auth";
 
 type Env = {
   Bindings: {
@@ -127,6 +127,110 @@ media.get(
 
     headers.set("Cache-Control", "private, max-age=3600");
     headers.set("ETag", object.httpEtag);
+
+    return new Response(object.body, {
+      headers,
+    });
+  }
+);
+
+// ADMIN-ONLY: stream a property evidence document (e.g. proof of authority
+// uploaded alongside a property_authority submission) so an admin can
+// actually inspect it before approving/rejecting. Uses the same
+// requireAdmin middleware as workers/api/src/routes/admin/verification.ts —
+// no new authorization mechanism, and no listing_status gate like the
+// public photo route above, since this must work before anything is live.
+media.get(
+  "/document/property/:documentId",
+  requireAuth,
+  requireAdmin,
+  async (c) => {
+    const documentId = c.req.param("documentId");
+
+    const record = await c.env.DB
+      .prepare(`
+        SELECT id, storage_key, mime_type
+        FROM property_documents
+        WHERE id = ?
+        LIMIT 1
+      `)
+      .bind(documentId)
+      .first<{
+        id: string;
+        storage_key: string;
+        mime_type: string | null;
+      }>();
+
+    if (!record) {
+      return c.json({ message: "Document not found" }, 404);
+    }
+
+    const object = await c.env.zimrent_media.get(record.storage_key);
+
+    if (!object) {
+      return c.json({ message: "Document object not found" }, 404);
+    }
+
+    const headers = new Headers();
+
+    object.writeHttpMetadata(headers);
+
+    if (record.mime_type) {
+      headers.set("Content-Type", record.mime_type);
+    }
+
+    // Evidence documents are private and admin-only — never cache them
+    // in a shared cache, and don't let the browser keep a disk copy.
+    headers.set("Cache-Control", "private, no-store");
+
+    return new Response(object.body, {
+      headers,
+    });
+  }
+);
+
+// ADMIN-ONLY: identity-document equivalent of the route above, for
+// identity_verifications.evidence_document_id.
+media.get(
+  "/document/identity/:documentId",
+  requireAuth,
+  requireAdmin,
+  async (c) => {
+    const documentId = c.req.param("documentId");
+
+    const record = await c.env.DB
+      .prepare(`
+        SELECT id, storage_key, mime_type
+        FROM identity_documents
+        WHERE id = ?
+        LIMIT 1
+      `)
+      .bind(documentId)
+      .first<{
+        id: string;
+        storage_key: string;
+        mime_type: string | null;
+      }>();
+
+    if (!record) {
+      return c.json({ message: "Document not found" }, 404);
+    }
+
+    const object = await c.env.zimrent_media.get(record.storage_key);
+
+    if (!object) {
+      return c.json({ message: "Document object not found" }, 404);
+    }
+
+    const headers = new Headers();
+
+    object.writeHttpMetadata(headers);
+
+    if (record.mime_type) {
+      headers.set("Content-Type", record.mime_type);
+    }
+
+    headers.set("Cache-Control", "private, no-store");
 
     return new Response(object.body, {
       headers,
