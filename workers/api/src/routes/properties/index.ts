@@ -362,7 +362,9 @@ properties.post("/", requireAuth, async (c) => {
       body.furnished ? 1 : 0,
       body.pets_allowed ? 1 : 0,
       body.gated ? 1 : 0,
-      body.utilities_included?.trim() || null,
+      typeof body.utilities_included === "string"
+    ? body.utilities_included.trim() || null
+    : body.utilities_included ?? null,
       body.security_features?.trim() || null,
       body.rules?.trim() || null,
       body.latitude ?? null,
@@ -613,12 +615,14 @@ properties.patch("/:id", requireAuth, async (c) => {
     );
   }
 
-  if (body.utilities_included !== undefined) {
-    add(
-      "utilities_included",
-      body.utilities_included.trim()
-    );
-  }
+if (body.utilities_included !== undefined) {
+  add(
+    "utilities_included",
+    typeof body.utilities_included === "string"
+      ? body.utilities_included.trim()
+      : body.utilities_included
+  );
+}
 
   if (body.security_features !== undefined) {
     add(

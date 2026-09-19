@@ -155,51 +155,7 @@ function splitPropertyListingRow(row) {
   return { property, listing };
 }
 
-// GET /properties/mine returns one joined row per owned property (property
-// columns + listing_id/listing_status/available_from/availability_confirmed_at
-// + my_authority_status/my_authority_id/my_authority_reviewed_at for the
-// caller's own property_authority record, if any). Split that into the
-// { property, listing, authorityStatus } shape MyProperties consumes.
-function splitOwnPropertyRow(row) {
-  if (!row) return { property: null, listing: null, authorityStatus: 'not_submitted', authorityId: null, authorityReviewedAt: null };
-  const {
-    listing_id, listing_status, available_from, availability_confirmed_at,
-    my_authority_status, my_authority_id, my_authority_reviewed_at,
-    ...propertyFields
-  } = row;
-  const property = normalizeEntity(propertyFields);
-  const listing = listing_id
-    ? normalizeEntity({
-      id: listing_id,
-      property_id: propertyFields.id,
-      created_by_id: propertyFields.created_by_id,
-      status: listing_status,
-      available_from,
-      availability_confirmed_at,
-      created_date: propertyFields.created_date,
-      updated_date: propertyFields.updated_date,
-    })
-    : null;
-  return {
-    property,
-    listing,
-    authorityStatus: my_authority_status || 'not_submitted',
-    authorityId: my_authority_id || null,
-    authorityReviewedAt: my_authority_reviewed_at || null,
-  };
-}
-
 const properties = {
-  // Every property the logged-in user owns, regardless of whether it has
-  // a listing yet. Unlike search()/get() (GET /properties), which only
-  // return properties with an active listing, this hits the protected
-  // GET /properties/mine endpoint so an owner can see a property that's
-  // still awaiting authority approval.
-  async mine() {
-    const result = await request('/properties/mine');
-    const rows = Array.isArray(result?.data) ? result.data : [];
-    return rows.map(splitOwnPropertyRow);
-  },
   async search(filters = {}, limit) {
     const params = new URLSearchParams();
     for (const [key, value] of Object.entries(filters)) {
@@ -222,10 +178,18 @@ const properties = {
     return Array.isArray(result?.data) ? result.data : [];
   },
   async create(data) {
-    return normalizeEntity(await request('/properties', {
+    // /properties returns { data: property } (see POST handler in
+    // workers/api/src/routes/properties/index.ts) — same envelope as
+    // get()/update() below, so this needs the same unwrap() before
+    // normalizeEntity(). Without it, normalizeEntity's own
+    // `if (entity.data !== undefined) return entity` check fires on the
+    // wrapper itself and returns { data: {...} } unnormalized, so callers
+    // reading `property.id` get undefined instead of the real id.
+    const result = await request('/properties', {
       method: 'POST',
       body: JSON.stringify(data),
-    }));
+    });
+    return normalizeEntity(unwrap(result));
   },
   async update(id, data) {
     const result = await request(`/properties/${encodeURIComponent(id)}`, {
@@ -349,69 +313,79 @@ const propertyAuthority = {
   },
 };
 
-  const admin = {
-    async identityQueue() {
-      const result = await request('/admin/verification/identity');
-      return Array.isArray(result?.data) ? result.data : [];
-    },
-    async propertyQueue() {
-      const result = await request('/admin/verification/properties');
-      return Array.isArray(result?.data) ? result.data : [];
-    },
-    async authorityQueue() {
-      const result = await request('/admin/verification/authority');
-      return Array.isArray(result?.data) ? result.data : [];
-    },
-    async reviewIdentity(id, status) {
-      const result = await request(`/admin/verification/identity/${encodeURIComponent(id)}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ status }),
-      });
-      return result?.data;
-    },
-    async reviewProperty(id, status, notes) {
-      const body = notes != null ? { status, notes } : { status };
-      const result = await request(`/admin/verification/properties/${encodeURIComponent(id)}`, {
-        method: 'PATCH',
-        body: JSON.stringify(body),
-      });
-      return result?.data;
-    },
-    async reviewAuthority(id, status) {
-      const result = await request(`/admin/verification/authority/${encodeURIComponent(id)}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ status }),
-      });
-      return result?.data;
-    },
-    async documentUrl(kind, documentId) {
-      const headers = new Headers();
-      const token = getToken();
-      if (token) headers.set('Authorization', `Bearer ${token}`);
+// Admin verification console — talks to the real workers/api/src/routes/
+// admin/verification.ts queues (identity, property, authority), which are
+// already gated server-side by requireAuth + requireAdmin. This client does
+// not add any authorization of its own; a non-admin simply gets a 403 from
+// the API like any other protected route.
+const admin = {
+  async identityQueue() {
+    const result = await request('/admin/verification/identity');
+    return Array.isArray(result?.data) ? result.data : [];
+  },
+  async propertyQueue() {
+    const result = await request('/admin/verification/properties');
+    return Array.isArray(result?.data) ? result.data : [];
+  },
+  async authorityQueue() {
+    const result = await request('/admin/verification/authority');
+    return Array.isArray(result?.data) ? result.data : [];
+  },
+  async reviewIdentity(id, status) {
+    const result = await request(`/admin/verification/identity/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    });
+    return result?.data;
+  },
+  async reviewProperty(id, status, notes) {
+    const body = notes != null ? { status, notes } : { status };
+    const result = await request(`/admin/verification/properties/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    });
+    return result?.data;
+  },
+  async reviewAuthority(id, status) {
+    const result = await request(`/admin/verification/authority/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    });
+    return result?.data;
+  },
+  // Evidence documents are private R2 objects served behind requireAdmin
+  // (see workers/api/src/routes/media.ts). A plain <a href> can't attach a
+  // bearer token, so this fetches the document as a blob with the same
+  // auth header `request()` uses, and hands back an object URL the caller
+  // opens (e.g. window.open) and revokes when done.
+  // kind: 'property' | 'identity' — matches the two admin document routes.
+  async documentUrl(kind, documentId) {
+    const headers = new Headers();
+    const token = getToken();
+    if (token) headers.set('Authorization', `Bearer ${token}`);
 
-      const response = await fetch(
-        `${API_BASE_URL}/media/document/${encodeURIComponent(kind)}/${encodeURIComponent(documentId)}`,
-        { headers, credentials: 'include' }
-      );
+    const response = await fetch(
+      `${API_BASE_URL}/media/document/${encodeURIComponent(kind)}/${encodeURIComponent(documentId)}`,
+      { headers, credentials: 'include' }
+    );
 
-      if (!response.ok) {
-        let message = response.statusText || 'Failed to load document';
-        try {
-          const payload = await response.json();
-          message = payload?.message || message;
-        } catch {
-          // Non-JSON error body — fall back to statusText above.
-        }
-        const error = new Error(message);
-        error.status = response.status;
-        throw error;
+    if (!response.ok) {
+      let message = response.statusText || 'Failed to load document';
+      try {
+        const payload = await response.json();
+        message = payload?.message || message;
+      } catch {
+        // Non-JSON error body — fall back to statusText above.
       }
+      const error = new Error(message);
+      error.status = response.status;
+      throw error;
+    }
 
-      const blob = await response.blob();
-      return URL.createObjectURL(blob);
-    },
-  };
-
+    const blob = await response.blob();
+    return URL.createObjectURL(blob);
+  },
+};
 
 const savedProperties = {
   async mine() {
@@ -567,11 +541,15 @@ const integrations = {
       }));
     },
 
-    async UploadPrivateFile({ file, property_id, document_type = 'authority' }) {
+    async UploadPrivateFile({ file, property_id, document_type }) {
       const form = new FormData();
       form.append('file', file);
-      if (property_id) form.append('property_id', property_id);
+      form.append('property_id', property_id);
       form.append('kind', 'document');
+      // The Worker requires document_type ('identity' | 'authority') for
+      // any kind === 'document' upload (see workers/api/src/routes/
+      // uploads.ts) — this was previously dropped entirely because this
+      // function never accepted or forwarded it.
       form.append('document_type', document_type);
 
       return unwrap(await request('/uploads', {

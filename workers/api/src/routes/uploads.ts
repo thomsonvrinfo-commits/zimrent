@@ -224,10 +224,9 @@ uploads.post("/", requireAuth, async (c) => {
           mime_type,
           file_size,
           sort_order,
-          created_date,
-          updated_date
+          created_date
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
       .bind(
         mediaId,
@@ -238,7 +237,6 @@ uploads.post("/", requireAuth, async (c) => {
         file.type,
         file.size,
         sortOrder,
-        now,
         now
       )
       .run();

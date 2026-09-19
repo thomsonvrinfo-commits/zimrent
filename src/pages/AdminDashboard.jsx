@@ -59,7 +59,7 @@ export default function AdminDashboard() {
     // The real authorization boundary is the API's requireAdmin middleware
     // (live is_admin DB check) — every call below is enforced there
     // regardless of what happens in this component.
-    if (user.role !== "admin") { navigate("/"); return; }
+    if (!user.is_admin) { navigate("/"); return; }
     loadQueues();
   }, [user, navigate, loadQueues]);
 

@@ -286,9 +286,9 @@ export default function AddProperty() {
        */
       const authorityDocument =
         await zimrent.integrations.Core.UploadPrivateFile({
-          file: form.authority_document_file,
-          property_id: property.id,
-          document_type: "authority",
+        file: form.authority_document_file,
+        property_id: property.id,
+        document_type: "authority",
         });
 
       const evidenceDocumentId = authorityDocument?.id;
