@@ -1,7 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { zimrent } from "@/api/zimrentClient";
 import { useAuth } from "@/lib/AuthContext";
-import { useProfile } from "@/hooks/useProfile";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -14,12 +13,19 @@ import { PROPERTY_TYPES } from "@/lib/rental-utils";
 
 const CITIES = ["Harare", "Bulawayo", "Chitungwiza", "Mutare", "Gweru", "Kwekwe", "Kadoma", "Masvingo"];
 
+// CHANGED FROM THE OLD VERSION: the old code fetched entities.Listing.filter()
+// (a route that never existed) and re-implemented filtering client-side over
+// fields — water_source, backup_power — that don't exist in the real
+// database at all. GET /properties already does server-side filtering
+// (city, suburb, property_type, min_rent, max_rent, bedrooms, pets_allowed,
+// furnished, gated) and only ever returns properties with an ACTIVE listing.
+// Until listing activation is built (Phase 2), this will legitimately return
+// zero results — that's expected, not a bug in this file.
 export default function Home() {
   const { user } = useAuth();
-  const { profile } = useProfile();
-  const [listings, setListings] = useState([]);
-  const [properties, setProperties] = useState([]);
-  const [ownerProfiles, setOwnerProfiles] = useState({});
+  const [allProperties, setAllProperties] = useState([]);
+  const [coverPhotos, setCoverPhotos] = useState({}); // property_id -> url
+  const [ownerProfiles, setOwnerProfiles] = useState({}); // created_by_id -> profile
   const [savedIds, setSavedIds] = useState(new Set());
   const [loading, setLoading] = useState(true);
   const [showFilters, setShowFilters] = useState(false);
@@ -29,45 +35,59 @@ export default function Home() {
   const [propertyType, setPropertyType] = useState("all");
   const [maxRent, setMaxRent] = useState(2000);
   const [minBedrooms, setMinBedrooms] = useState(0);
-  const [waterSource, setWaterSource] = useState("all");
-  const [backupPower, setBackupPower] = useState("all");
+  const [minBathrooms, setMinBathrooms] = useState(0);
   const [furnishedOnly, setFurnishedOnly] = useState(false);
   const [verifiedOnly, setVerifiedOnly] = useState(false);
   const [gatedOnly, setGatedOnly] = useState(false);
   const [petsAllowed, setPetsAllowed] = useState(false);
-  const [minBathrooms, setMinBathrooms] = useState(0);
 
   useEffect(() => {
+    let active = true;
+    setLoading(true);
     (async () => {
       try {
-        const allListings = await zimrent.entities.Listing.filter({ status: "active" }, "-availability_confirmed_at", 60);
-        setListings(allListings || []);
-        const propIds = [...new Set((allListings || []).map(l => l.data?.property_id).filter(Boolean))];
-        const props = await Promise.all(propIds.map(id => zimrent.entities.Property.get(id).catch(() => null)));
-        const propMap = {};
-        props.forEach(p => { if (p) propMap[p.id] = p; });
-        setProperties(propMap);
+        const props = await zimrent.properties.list({
+          city: city !== "all" ? city : undefined,
+          property_type: propertyType !== "all" ? propertyType : undefined,
+          max_rent: maxRent < 2000 ? maxRent : undefined,
+          bedrooms: minBedrooms > 0 ? minBedrooms : undefined,
+          furnished: furnishedOnly ? true : undefined,
+          gated: gatedOnly ? true : undefined,
+          pets_allowed: petsAllowed ? true : undefined,
+          limit: 50,
+        });
+        if (!active) return;
+        setAllProperties(props || []);
 
-        // Load owner profiles
-        const ownerIds = [...new Set((allListings || []).map(l => l.created_by_id).filter(Boolean))];
-        const ownerProfilesData = await Promise.all(ownerIds.map(id => zimrent.entities.Profile.filter({ created_by_id: id }).catch(() => [])));
-        const ownerMap = {};
-        ownerIds.forEach((id, i) => { if (ownerProfilesData[i]?.[0]) ownerMap[id] = ownerProfilesData[i][0]; });
-        setOwnerProfiles(ownerMap);
+        const photoEntries = await Promise.all((props || []).map(async (p) => {
+          try {
+            const media = await zimrent.properties.media(p.id);
+            const first = media?.[0];
+            return [p.id, first ? zimrent.properties.photoUrl(p.id, first.id) : null];
+          } catch { return [p.id, null]; }
+        }));
+        if (active) setCoverPhotos(Object.fromEntries(photoEntries.filter(([, url]) => url)));
+
+        const ownerIds = [...new Set((props || []).map(p => p.created_by_id).filter(Boolean))];
+        const ownerEntries = await Promise.all(ownerIds.map(async (id) => {
+          try { return [id, await zimrent.profiles.getByUserId(id)]; } catch { return [id, null]; }
+        }));
+        if (active) setOwnerProfiles(Object.fromEntries(ownerEntries.filter(([, p]) => p)));
       } catch (e) {
-        // ignore
+        if (active) setAllProperties([]);
       } finally {
-        setLoading(false);
+        if (active) setLoading(false);
       }
     })();
-  }, []);
+    return () => { active = false; };
+  }, [city, propertyType, maxRent, minBedrooms, furnishedOnly, gatedOnly, petsAllowed]);
 
   useEffect(() => {
     if (!user) return;
     (async () => {
       try {
-        const saved = await zimrent.entities.SavedProperty.filter({ user_id: user.id });
-        setSavedIds(new Set((saved || []).map(s => s.data?.property_id)));
+        const saved = await zimrent.savedProperties.list();
+        setSavedIds(new Set((saved || []).map(s => s.property_id)));
       } catch (e) {}
     })();
   }, [user]);
@@ -76,51 +96,37 @@ export default function Home() {
     if (!user) return;
     try {
       if (savedIds.has(propertyId)) {
-        const saved = await zimrent.entities.SavedProperty.filter({ user_id: user.id, property_id: propertyId });
-        if (saved[0]) await zimrent.entities.SavedProperty.delete(saved[0].id);
+        await zimrent.savedProperties.unsave(propertyId);
         setSavedIds(prev => { const n = new Set(prev); n.delete(propertyId); return n; });
       } else {
-        await zimrent.entities.SavedProperty.create({ user_id: user.id, property_id: propertyId });
+        await zimrent.savedProperties.save(propertyId);
         setSavedIds(prev => new Set(prev).add(propertyId));
       }
     } catch (e) {}
   };
 
   const filteredResults = useMemo(() => {
-    return listings.filter(listing => {
-      const prop = properties[listing.data?.property_id];
-      if (!prop) return false;
-      const d = prop.data;
-      if (city !== "all" && d.city !== city) return false;
-      if (propertyType !== "all" && d.property_type !== propertyType) return false;
-      if (listing.data?.monthly_rent > maxRent) return false;
-      if (d.bedrooms < minBedrooms) return false;
-      if (waterSource !== "all" && d.water_source !== waterSource) return false;
-      if (backupPower !== "all" && d.backup_power !== backupPower) return false;
-      if (furnishedOnly && !d.furnished) return false;
-      if (verifiedOnly && d.verification_status !== "verified") return false;
-      if (gatedOnly && !d.gated) return false;
-      if (petsAllowed && !d.pets_allowed) return false;
-      if (d.bathrooms < minBathrooms) return false;
+    return allProperties.filter(p => {
+      if (verifiedOnly && p.verification_status !== "verified") return false;
+      if (p.bathrooms < minBathrooms) return false;
       if (search) {
         const q = search.toLowerCase();
-        const haystack = `${d.title} ${d.suburb} ${d.city} ${d.area} ${listing.data?.title}`.toLowerCase();
+        const haystack = `${p.title} ${p.suburb} ${p.city}`.toLowerCase();
         if (!haystack.includes(q)) return false;
       }
       return true;
     });
-  }, [listings, properties, city, propertyType, maxRent, minBedrooms, waterSource, backupPower, furnishedOnly, verifiedOnly, search]);
+  }, [allProperties, verifiedOnly, minBathrooms, search]);
 
-  const hasActiveFilters = city !== "all" || propertyType !== "all" || maxRent < 2000 || minBedrooms > 0 || minBathrooms > 0 || waterSource !== "all" || backupPower !== "all" || furnishedOnly || verifiedOnly || gatedOnly || petsAllowed || search;
+  const hasActiveFilters = city !== "all" || propertyType !== "all" || maxRent < 2000 || minBedrooms > 0 || minBathrooms > 0 || furnishedOnly || verifiedOnly || gatedOnly || petsAllowed || search;
 
   const clearFilters = () => {
     setSearch(""); setCity("all"); setPropertyType("all"); setMaxRent(2000); setMinBedrooms(0); setMinBathrooms(0);
-    setWaterSource("all"); setBackupPower("all"); setFurnishedOnly(false); setVerifiedOnly(false); setGatedOnly(false); setPetsAllowed(false);
+    setFurnishedOnly(false); setVerifiedOnly(false); setGatedOnly(false); setPetsAllowed(false);
   };
 
   return (
     <div className="min-h-screen">
-      {/* Hero */}
       <div className="relative bg-gradient-to-br from-primary via-primary to-primary/80 overflow-hidden">
         <div className="absolute inset-0 opacity-10" style={{ backgroundImage: "url('https://images.unsplash.com/photo-1564013799919-ab600027ffc6?w=1600')", backgroundSize: "cover", backgroundPosition: "center" }} />
         <div className="relative px-4 sm:px-8 lg:px-12 pt-12 pb-8 lg:pt-20 lg:pb-12 max-w-7xl mx-auto">
@@ -135,7 +141,6 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Search bar */}
       <div className="px-4 sm:px-8 lg:px-12 max-w-7xl mx-auto -mt-6 relative z-10">
         <div className="bg-card rounded-2xl shadow-lg border border-border p-4 lg:p-5">
           <div className="flex flex-col lg:flex-row gap-3">
@@ -193,30 +198,6 @@ export default function Home() {
                 </Select>
               </div>
               <div>
-                <Label className="text-xs text-muted-foreground">Water source</Label>
-                <Select value={waterSource} onValueChange={setWaterSource}>
-                  <SelectTrigger className="mt-1.5 h-10"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Any</SelectItem>
-                    <SelectItem value="borehole">Borehole</SelectItem>
-                    <SelectItem value="council">Council</SelectItem>
-                    <SelectItem value="mixed">Mixed</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label className="text-xs text-muted-foreground">Backup power</Label>
-                <Select value={backupPower} onValueChange={setBackupPower}>
-                  <SelectTrigger className="mt-1.5 h-10"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Any</SelectItem>
-                    <SelectItem value="solar">Solar</SelectItem>
-                    <SelectItem value="inverter">Inverter</SelectItem>
-                    <SelectItem value="generator">Generator</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
                 <Label className="text-xs text-muted-foreground">Min bathrooms</Label>
                 <Select value={String(minBathrooms)} onValueChange={(v) => setMinBathrooms(Number(v))}>
                   <SelectTrigger className="mt-1.5 h-10"><SelectValue /></SelectTrigger>
@@ -228,7 +209,7 @@ export default function Home() {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="flex items-center gap-4 col-span-2 lg:col-span-4 flex-wrap">
+              <div className="flex items-center gap-4 col-span-2 lg:col-span-2 flex-wrap">
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
                   <input type="checkbox" checked={furnishedOnly} onChange={(e) => setFurnishedOnly(e.target.checked)} className="w-4 h-4 rounded accent-primary" />
                   Furnished only
@@ -256,7 +237,6 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Results */}
       <div className="px-4 sm:px-8 lg:px-12 max-w-7xl mx-auto py-8">
         <div className="flex items-center justify-between mb-5">
           <p className="text-sm text-muted-foreground">
@@ -274,21 +254,20 @@ export default function Home() {
           />
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 animate-fade-in">
-            {filteredResults.map(listing => (
+            {filteredResults.map(property => (
               <PropertyCard
-                key={listing.id}
-                property={properties[listing.data?.property_id]}
-                listing={listing}
-                ownerProfile={ownerProfiles[listing.created_by_id]}
-                saved={savedIds.has(listing.data?.property_id)}
-                onToggleSave={() => toggleSave(listing.data?.property_id)}
+                key={property.id}
+                property={property}
+                ownerProfile={ownerProfiles[property.created_by_id]}
+                coverPhotoUrl={coverPhotos[property.id]}
+                saved={savedIds.has(property.id)}
+                onToggleSave={() => toggleSave(property.id)}
               />
             ))}
           </div>
         )}
       </div>
 
-      {/* Trust banner */}
       <div className="px-4 sm:px-8 lg:px-12 max-w-7xl mx-auto pb-12">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {[
