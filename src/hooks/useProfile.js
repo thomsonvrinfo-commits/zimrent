@@ -2,8 +2,14 @@ import { useState, useEffect } from "react";
 import { zimrent } from "@/api/zimrentClient";
 import { useAuth } from "@/lib/AuthContext";
 
-// Loads the current user's Profile entity (rental role, verification, trust).
-// The Profile is separate from the built-in User; created during onboarding.
+// Loads the current user's Profile row (display name, phone, bio,
+// verification statuses). Separate from the built-in User row; created
+// during onboarding via POST /profiles.
+//
+// Returns the profile FLAT (profile.display_name, not profile.data.display_name)
+// — matches the real /profiles/me response shape. Any consuming component
+// still written against the old `.data.*` shape needs updating; see
+// PHASE-1-IMPLEMENTATION-NOTES.md.
 export function useProfile() {
   const { user, isAuthenticated, authChecked } = useAuth();
   const [profile, setProfile] = useState(null);
@@ -17,9 +23,9 @@ export function useProfile() {
     let active = true;
     (async () => {
       try {
-        const profiles = await zimrent.entities.Profile.filter({ created_by_id: user.id });
+        const p = await zimrent.profiles.me();
         if (active) {
-          setProfile(profiles && profiles.length > 0 ? profiles[0] : null);
+          setProfile(p);
           setLoading(false);
         }
       } catch (e) {
@@ -32,10 +38,14 @@ export function useProfile() {
   const refresh = async () => {
     if (!user) return;
     try {
-      const profiles = await zimrent.entities.Profile.filter({ created_by_id: user.id });
-      setProfile(profiles && profiles.length > 0 ? profiles[0] : null);
+      const p = await zimrent.profiles.me();
+      setProfile(p);
     } catch (e) { /* ignore */ }
   };
 
-  return { profile, loading, refresh, isAdmin: user?.role === "admin" };
+  // Fixed: the backend gates admin access via a separate `is_admin` flag on
+  // the users table, never the `role` column. /auth/me already returns
+  // is_admin (see AuthContext's user object), so this now reflects reality
+  // instead of always being false.
+  return { profile, loading, refresh, isAdmin: Boolean(user?.is_admin) };
 }
