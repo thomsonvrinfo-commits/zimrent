@@ -1,92 +1,78 @@
-import * as React from "react"
-import { Slot } from "@radix-ui/react-slot"
-import { ChevronRight, MoreHorizontal } from "lucide-react"
+import React from 'react';
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 
-import { cn } from "@/lib/utils"
+import { AuthProvider } from '@/context/AuthContext';
+import ProtectedRoute from '@/components/ProtectedRoute';
+import AppLayout from '@/components/AppLayout';
 
-const Breadcrumb = React.forwardRef(
-  ({ ...props }, ref) => <nav ref={ref} aria-label="breadcrumb" {...props} />
-)
-Breadcrumb.displayName = "Breadcrumb"
+import Login from '@/pages/Login';
+import Register from '@/pages/Register';
+import ResetPassword from '@/pages/ResetPassword';
+import VerifyEmail from '@/pages/VerifyEmail';
 
-const BreadcrumbList = React.forwardRef(({ className, ...props }, ref) => (
-  <ol
-    ref={ref}
-    className={cn(
-      "flex flex-wrap items-center gap-1.5 break-words text-sm text-muted-foreground sm:gap-2.5",
-      className
-    )}
-    {...props} />
-))
-BreadcrumbList.displayName = "BreadcrumbList"
+import Home from '@/pages/Home';
+import PropertyDetails from '@/pages/PropertyDetails';
+import AddProperty from '@/pages/AddProperty';
+import MyProperties from '@/pages/MyProperties';
+import TenantDashboard from '@/pages/TenantDashboard';
+import OwnerDashboard from '@/pages/OwnerDashboard';
+import Profile from '@/pages/Profile';
+import AdminDashboard from '@/pages/AdminDashboard';
 
-const BreadcrumbItem = React.forwardRef(({ className, ...props }, ref) => (
-  <li
-    ref={ref}
-    className={cn("inline-flex items-center gap-1.5", className)}
-    {...props} />
-))
-BreadcrumbItem.displayName = "BreadcrumbItem"
-
-const BreadcrumbLink = React.forwardRef(({ asChild, className, ...props }, ref) => {
-  const Comp = asChild ? Slot : "a"
-
+function App() {
   return (
-    (<Comp
-      ref={ref}
-      className={cn("transition-colors hover:text-foreground", className)}
-      {...props} />)
+    <BrowserRouter>
+      <AuthProvider>
+        <Routes>
+
+          {/* Public routes */}
+          <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
+          <Route path="/verify-email" element={<VerifyEmail />} />
+
+          {/* Protected application routes */}
+          <Route
+            element={
+              <ProtectedRoute
+                unauthenticatedElement={
+                  <Navigate to="/login" replace />
+                }
+              />
+            }
+          >
+            <Route element={<AppLayout />}>
+              <Route path="/" element={<Home />} />
+              <Route path="/property/:id" element={<PropertyDetails />} />
+              <Route path="/add-property" element={<AddProperty />} />
+              <Route path="/my-properties" element={<MyProperties />} />
+              <Route path="/tenant-dashboard" element={<TenantDashboard />} />
+              <Route path="/owner-dashboard" element={<OwnerDashboard />} />
+              <Route path="/profile" element={<Profile />} />
+            </Route>
+          </Route>
+
+          {/* Admin-only route */}
+          <Route
+            element={
+              <ProtectedRoute
+                requireAdmin
+                unauthenticatedElement={
+                  <Navigate to="/login" replace />
+                }
+              />
+            }
+          >
+            <Route path="/admin" element={<AdminDashboard />} />
+          </Route>
+
+          {/* Fallback */}
+          <Route path="*" element={<Navigate to="/" replace />} />
+
+        </Routes>
+      </AuthProvider>
+    </BrowserRouter>
   );
-})
-BreadcrumbLink.displayName = "BreadcrumbLink"
-
-const BreadcrumbPage = React.forwardRef(({ className, ...props }, ref) => (
-  <span
-    ref={ref}
-    role="link"
-    aria-disabled="true"
-    aria-current="page"
-    className={cn("font-normal text-foreground", className)}
-    {...props} />
-))
-BreadcrumbPage.displayName = "BreadcrumbPage"
-
-const BreadcrumbSeparator = ({
-  children,
-  className,
-  ...props
-}) => (
-  <li
-    role="presentation"
-    aria-hidden="true"
-    className={cn("[&>svg]:w-3.5 [&>svg]:h-3.5", className)}
-    {...props}>
-    {children ?? <ChevronRight />}
-  </li>
-)
-BreadcrumbSeparator.displayName = "BreadcrumbSeparator"
-
-const BreadcrumbEllipsis = ({
-  className,
-  ...props
-}) => (
-  <span
-    role="presentation"
-    aria-hidden="true"
-    className={cn("flex h-9 w-9 items-center justify-center", className)}
-    {...props}>
-    <MoreHorizontal className="h-4 w-4" />
-    <span className="sr-only">More</span>
-  </span>
-)
-BreadcrumbEllipsis.displayName = "BreadcrumbElipssis"
-
-export {
-  Breadcrumb,
-  BreadcrumbList,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-  BreadcrumbEllipsis,
 }
+
+export default App;
