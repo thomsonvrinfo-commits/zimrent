@@ -14,13 +14,17 @@ export function useProfile() {
   const { user, isAuthenticated, authChecked } = useAuth();
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [capabilities, setCapabilities] = useState([]);
+  const [capabilitiesLoading, setCapabilitiesLoading] = useState(true);
 
   useEffect(() => {
     if (!authChecked || !isAuthenticated || !user) {
       setLoading(false);
+      setCapabilitiesLoading(false);
       return;
     }
     let active = true;
+
     (async () => {
       try {
         const p = await zimrent.profiles.me();
@@ -32,6 +36,22 @@ export function useProfile() {
         if (active) setLoading(false);
       }
     })();
+
+    (async () => {
+      try {
+        const rows = await zimrent.capabilities.mine();
+        if (active) {
+          // /capabilities/me returns [{ capability, granted_at }, ...];
+          // AppLayout's buildCapabilityNav does capabilities.includes("renting")
+          // against plain strings, so map down to just the capability names.
+          setCapabilities(Array.isArray(rows) ? rows.map((r) => r.capability) : []);
+          setCapabilitiesLoading(false);
+        }
+      } catch (e) {
+        if (active) setCapabilitiesLoading(false);
+      }
+    })();
+
     return () => { active = false; };
   }, [user, isAuthenticated, authChecked]);
 
@@ -47,5 +67,5 @@ export function useProfile() {
   // the users table, never the `role` column. /auth/me already returns
   // is_admin (see AuthContext's user object), so this now reflects reality
   // instead of always being false.
-  return { profile, loading, refresh, isAdmin: Boolean(user?.is_admin) };
+  return { profile, loading, refresh, capabilities, capabilitiesLoading, isAdmin: Boolean(user?.is_admin) };
 }

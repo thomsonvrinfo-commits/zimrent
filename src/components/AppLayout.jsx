@@ -9,49 +9,72 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const NAV_SECTIONS = {
-  tenant: [
-    { label: "Discover", to: "/", icon: Home },
-    { label: "My Dashboard", to: "/tenant-dashboard", icon: LayoutDashboard },
-    { label: "Saved", to: "/tenant-dashboard?tab=saved", icon: Heart, hide: true },
-    { label: "Messages", to: "/messages", icon: MessageSquare },
-    { label: "Profile", to: "/profile", icon: User }
-  ],
-  owner: [
-    { label: "Discover", to: "/", icon: Home },
-    { label: "Owner Dashboard", to: "/owner-dashboard", icon: LayoutDashboard },
-    { label: "My Properties", to: "/my-properties", icon: Building2 },
-    { label: "Add Property", to: "/add-property", icon: Plus },
-    { label: "Messages", to: "/messages", icon: MessageSquare },
-    { label: "Profile", to: "/profile", icon: User }
-  ],
-  agent: [
-    { label: "Discover", to: "/", icon: Home },
-    { label: "My Properties", to: "/my-properties", icon: Building2 },
-    { label: "Add Property", to: "/add-property", icon: Plus },
-    { label: "Messages", to: "/messages", icon: MessageSquare },
-    { label: "Profile", to: "/profile", icon: User }
-  ],
-  admin: [
-    { label: "Discover", to: "/", icon: Home },
-    { label: "Admin Console", to: "/admin", icon: Shield },
-    { label: "Messages", to: "/messages", icon: MessageSquare },
-    { label: "Profile", to: "/profile", icon: User }
-  ]
+// Individual nav items, deduplicated so capability sections can be composed
+// additively (an account with both "renting" and "listing" capabilities sees
+// both sets of items, not one or the other).
+const NAV_ITEMS = {
+  discover: { label: "Discover", to: "/", icon: Home },
+  tenantDashboard: { label: "My Dashboard", to: "/tenant-dashboard", icon: LayoutDashboard },
+  saved: { label: "Saved", to: "/tenant-dashboard?tab=saved", icon: Heart, hide: true },
+  ownerDashboard: { label: "Owner Dashboard", to: "/owner-dashboard", icon: LayoutDashboard },
+  myProperties: { label: "My Properties", to: "/my-properties", icon: Building2 },
+  addProperty: { label: "Add Property", to: "/add-property", icon: Plus },
+  messages: { label: "Messages", to: "/messages", icon: MessageSquare },
+  profile: { label: "Profile", to: "/profile", icon: User }
 };
+
+// Legacy users.role → nav mapping. This is NOT the authoritative permission
+// system (workers/api/src/services/capabilities.ts is) — it's used only as a
+// brief fallback while the real user_capabilities data is still loading, so
+// nav doesn't flash empty on first render.
+const LEGACY_ROLE_NAV = {
+  tenant: [NAV_ITEMS.discover, NAV_ITEMS.tenantDashboard, NAV_ITEMS.saved, NAV_ITEMS.messages, NAV_ITEMS.profile],
+  owner: [NAV_ITEMS.discover, NAV_ITEMS.ownerDashboard, NAV_ITEMS.myProperties, NAV_ITEMS.addProperty, NAV_ITEMS.messages, NAV_ITEMS.profile],
+  agent: [NAV_ITEMS.discover, NAV_ITEMS.myProperties, NAV_ITEMS.addProperty, NAV_ITEMS.messages, NAV_ITEMS.profile]
+};
+
+// Admin nav is left exactly as it was before this change — additive
+// capability nav is scoped to the renting/listing model only, not to
+// is_admin, which is a separate, deliberately API-inaccessible flag.
+const ADMIN_NAV = [
+  { label: "Discover", to: "/", icon: Home },
+  { label: "Admin Console", to: "/admin", icon: Shield },
+  { label: "Messages", to: "/messages", icon: MessageSquare },
+  { label: "Profile", to: "/profile", icon: User }
+];
+
+// Builds nav additively from the account's real capabilities
+// (user_capabilities: "renting" and/or "listing"), so both sections show for
+// an account with both instead of forcing a single mutually-exclusive role.
+function buildCapabilityNav(capabilities) {
+  const items = [NAV_ITEMS.discover];
+  if (capabilities.includes("renting")) {
+    items.push(NAV_ITEMS.tenantDashboard, NAV_ITEMS.saved);
+  }
+  if (capabilities.includes("listing")) {
+    items.push(NAV_ITEMS.ownerDashboard, NAV_ITEMS.myProperties, NAV_ITEMS.addProperty);
+  }
+  items.push(NAV_ITEMS.messages, NAV_ITEMS.profile);
+  return items;
+}
 
 export default function AppLayout() {
   const { user, logout } = useAuth();
-  const { profile, loading, isAdmin } = useProfile();
+  const { profile, loading, isAdmin, capabilities, capabilitiesLoading } = useProfile();
   const location = useLocation();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [notifOpen, setNotifOpen] = useState(false);
 
-  const role = profile?.data?.role || "tenant";
-  const navItems = NAV_SECTIONS[role] || NAV_SECTIONS.tenant;
-  const effectiveNav = isAdmin ? NAV_SECTIONS.admin : navItems;
+  const role = user?.role || profile?.data?.role || "tenant";
+  // While capabilities are still loading, fall back to the legacy role
+  // mapping so nav doesn't briefly render empty; once loaded, nav is built
+  // additively from the account's real capabilities instead.
+  const navItems = capabilitiesLoading
+    ? (LEGACY_ROLE_NAV[role] || LEGACY_ROLE_NAV.tenant)
+    : buildCapabilityNav(capabilities);
+  const effectiveNav = isAdmin ? ADMIN_NAV : navItems;
 
   useEffect(() => {
     setMobileOpen(false);
@@ -83,7 +106,7 @@ export default function AppLayout() {
     logout();
   };
 
-  const initials = (profile?.data?.full_name || user?.full_name || user?.email || "U")
+  const initials = (profile?.data?.display_name || user?.display_name || user?.email || "U")
     .split(" ").map(s => s[0]).slice(0, 2).join("").toUpperCase();
 
   return (
@@ -124,7 +147,7 @@ export default function AppLayout() {
               <AvatarFallback className="bg-primary/10 text-primary text-xs font-semibold">{initials}</AvatarFallback>
             </Avatar>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-foreground truncate">{profile?.data?.full_name || user?.full_name || "User"}</p>
+              <p className="text-sm font-medium text-foreground truncate">{profile?.data?.display_name || user?.display_name || "User"}</p>
               <p className="text-xs text-muted-foreground capitalize">{role}</p>
             </div>
           </Link>

@@ -64,7 +64,7 @@ export default function PropertyCard({ property, listing, ownerProfile, saved, o
           <span className="text-xs text-muted-foreground">{PROPERTY_TYPES[property.data?.property_type]}</span>
           {ownerProfile && (
             <div className="flex items-center gap-1.5">
-              <span className="text-xs text-muted-foreground">{ownerProfile.data?.full_name?.split(" ")[0]}</span>
+              <span className="text-xs text-muted-foreground">{ownerProfile.data?.display_name?.split(" ")[0]}</span>
               <IdentityBadge status={ownerProfile.data?.identity_status} showLabel={false} />
             </div>
           )}

@@ -26,7 +26,8 @@ me.get("/", async (c) => {
         email,
         display_name,
         role,
-        email_verified
+        email_verified,
+        is_admin
       FROM users
       WHERE id = ?
     `)
@@ -37,6 +38,7 @@ me.get("/", async (c) => {
       display_name: string | null;
       role: string;
       email_verified: number;
+      is_admin: number;
     }>();
 
   if (!user) {
@@ -49,6 +51,7 @@ me.get("/", async (c) => {
     display_name: user.display_name,
     role: user.role,
     email_verified: Boolean(user.email_verified),
+    is_admin: Boolean(user.is_admin),
   });
 });
 

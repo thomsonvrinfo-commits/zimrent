@@ -7,9 +7,15 @@ APP_ENV = "production"
 ALLOWED_ORIGINS = "https://zimrent.pages.dev"
 FRONTEND_URL = "https://zimrent.pages.dev"
 GOOGLE_REDIRECT_URI = "https://zimrent-api.thomsonvr-info.workers.dev/auth/google/callback"
+BREVO_FROM_EMAIL = "tawandatype@gmail.com"
+BREVO_FROM_NAME = "ZimRent"
 
 [[d1_databases]]
 binding = "DB"
 database_name = "zimrent-db"
 database_id = "2bfcd890-b176-4358-94fa-23b42790e942"
 migrations_dir = "../../db/migrations"
+
+[[r2_buckets]]
+binding = "zimrent_media"
+bucket_name = "zimrent-media"

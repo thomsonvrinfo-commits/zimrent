@@ -154,7 +154,10 @@ conversations.get("/", async (c) => {
        c.*,
        p.title AS property_title,
        p.city AS property_city,
-       p.suburb AS property_suburb
+       p.suburb AS property_suburb,
+       (SELECT body FROM messages m
+        WHERE m.conversation_id = c.id
+        ORDER BY m.created_date DESC LIMIT 1) AS last_message_preview
      FROM conversations c
      LEFT JOIN properties p ON p.id = c.property_id
      WHERE c.tenant_id = ?

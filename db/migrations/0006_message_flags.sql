@@ -1,0 +1,2 @@
+ALTER TABLE messages ADD COLUMN flagged INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE messages ADD COLUMN flag_reason TEXT;
