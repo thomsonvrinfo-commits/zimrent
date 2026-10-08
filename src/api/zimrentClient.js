@@ -156,6 +156,13 @@ function splitPropertyListingRow(row) {
 }
 
 const properties = {
+  // Every property the signed-in user owns / holds authority for, with or
+  // without a listing. Rows are flat (not normalizeEntity-wrapped) and carry
+  // my_authority_status, listing_id and listing_status.
+  async mine() {
+    const result = await request('/properties/mine');
+    return Array.isArray(result?.data) ? result.data : [];
+  },
   async search(filters = {}, limit) {
     const params = new URLSearchParams();
     for (const [key, value] of Object.entries(filters)) {
@@ -207,10 +214,13 @@ const listings = {
     return rows.map(normalizeEntity);
   },
   async create(data) {
-    return normalizeEntity(await request('/listings', {
+    // POST /listings returns { data: listing } — unwrap before normalizing,
+    // same as properties.create(), so callers get a flat entity with .id.
+    const result = await request('/listings', {
       method: 'POST',
       body: JSON.stringify(data),
-    }));
+    });
+    return normalizeEntity(unwrap(result));
   },
   async update(id, data) {
     const result = await request(`/listings/${encodeURIComponent(id)}`, {
@@ -343,6 +353,18 @@ const admin = {
     const result = await request(`/admin/verification/properties/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       body: JSON.stringify(body),
+    });
+    return result?.data;
+  },
+  async listingQueue() {
+    const result = await request('/admin/verification/listings');
+    return Array.isArray(result?.data) ? result.data : [];
+  },
+  // status: 'active' | 'rejected' | 'inactive'
+  async reviewListing(id, status) {
+    const result = await request(`/admin/verification/listings/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
     });
     return result?.data;
   },

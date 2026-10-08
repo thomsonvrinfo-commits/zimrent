@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-  Shield, UserCheck, Building2, FileCheck,
+  Shield, UserCheck, Building2, FileCheck, ListChecks,
   CheckCircle2, XCircle, Eye, Loader2
 } from "lucide-react";
 import StateBadge from "@/components/StateBadge";
@@ -21,6 +21,9 @@ const STATUS_COLOR = {
   rejected: "destructive",
   revoked: "destructive",
   unverified: "secondary",
+  pending_verification: "warning",
+  active: "success",
+  inactive: "secondary",
 };
 
 export default function AdminDashboard() {
@@ -32,19 +35,22 @@ export default function AdminDashboard() {
   const [identityQueue, setIdentityQueue] = useState([]);
   const [propertyQueue, setPropertyQueue] = useState([]);
   const [authorityQueue, setAuthorityQueue] = useState([]);
+  const [listingQueue, setListingQueue] = useState([]);
   const [actioningId, setActioningId] = useState(null);
   const [viewingDocId, setViewingDocId] = useState(null);
 
   const loadQueues = useCallback(async () => {
     try {
-      const [identity, property, authority] = await Promise.all([
+      const [identity, property, authority, listings] = await Promise.all([
         zimrent.admin.identityQueue(),
         zimrent.admin.propertyQueue(),
         zimrent.admin.authorityQueue(),
+        zimrent.admin.listingQueue(),
       ]);
       setIdentityQueue(identity);
       setPropertyQueue(property);
       setAuthorityQueue(authority);
+      setListingQueue(listings);
       setError(null);
     } catch (e) {
       setError(e.message || "Failed to load verification queues");
@@ -95,6 +101,7 @@ export default function AdminDashboard() {
   const pendingIdentity = identityQueue.filter((r) => r.status === "pending");
   const pendingProperty = propertyQueue.filter((r) => r.status === "pending");
   const pendingAuthority = authorityQueue.filter((r) => r.status === "pending");
+  const pendingListings = listingQueue.filter((r) => r.status === "pending_verification");
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-8">
@@ -115,10 +122,11 @@ export default function AdminDashboard() {
       )}
 
       <Tabs defaultValue="identity" className="w-full">
-        <TabsList className="grid w-full grid-cols-3 mb-5">
+        <TabsList className="grid w-full grid-cols-4 mb-5">
           <TabsTrigger value="identity">Identity ({pendingIdentity.length})</TabsTrigger>
           <TabsTrigger value="property">Property ({pendingProperty.length})</TabsTrigger>
           <TabsTrigger value="authority">Authority ({pendingAuthority.length})</TabsTrigger>
+          <TabsTrigger value="listings">Listings ({pendingListings.length})</TabsTrigger>
         </TabsList>
 
         <TabsContent value="identity" className="space-y-3">
@@ -264,6 +272,66 @@ export default function AdminDashboard() {
                         <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" /> Approve
                       </Button>
                     </>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </TabsContent>
+
+        <TabsContent value="listings" className="space-y-3">
+          {listingQueue.length === 0 ? (
+            <EmptyState
+              icon={ListChecks}
+              title="No listings to review"
+              description="Listings submitted by owners will appear here."
+            />
+          ) : listingQueue.map((r) => (
+            <Card key={r.id} className="border-border">
+              <CardContent className="p-4 flex items-center justify-between gap-4">
+                <div className="min-w-0">
+                  <p className="font-medium text-sm truncate">{r.title || "Untitled property"}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {r.display_name || r.email} · {r.suburb ? `${r.suburb}, ` : ""}{r.city} · Submitted {formatDate(r.created_date)}
+                  </p>
+                  {r.owner_authority_status && r.owner_authority_status !== "approved" && (
+                    <p className="text-xs text-destructive mt-0.5">
+                      Owner authority is {r.owner_authority_status} — this listing cannot be activated.
+                    </p>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <StateBadge
+                    status={r.status}
+                    label={r.status === "pending_verification" ? "pending" : r.status}
+                    color={STATUS_COLOR[r.status] || "secondary"}
+                  />
+                  {r.status === "pending_verification" && (
+                    <>
+                      <Button
+                        size="sm" variant="outline" className="border-destructive/30 text-destructive"
+                        disabled={actioningId === r.id}
+                        onClick={() => runReview(r.id, () => zimrent.admin.reviewListing(r.id, "rejected"))}
+                      >
+                        <XCircle className="w-3.5 h-3.5 mr-1.5" /> Reject
+                      </Button>
+                      <Button
+                        size="sm"
+                        disabled={actioningId === r.id}
+                        onClick={() => runReview(r.id, () => zimrent.admin.reviewListing(r.id, "active"))}
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" /> Approve
+                      </Button>
+                    </>
+                  )}
+                  {r.status === "active" && (
+                    <Button
+                      size="sm" variant="outline"
+                      disabled={actioningId === r.id}
+                      onClick={() => runReview(r.id, () => zimrent.admin.reviewListing(r.id, "inactive"))}
+                    >
+                      Deactivate
+                    </Button>
                   )}
                 </div>
               </CardContent>

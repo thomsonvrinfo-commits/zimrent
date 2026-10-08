@@ -9,6 +9,7 @@ import resetPassword from "./routes/auth/resetPassword";
 import createListing from "./routes/listings/create";
 import manageListings from "./routes/listings/manage";
 import properties from "./routes/properties";
+import propertiesMine from "./routes/properties/mine";
 import uploads from "./routes/uploads";
 import media from "./routes/media";
 import messages from "./routes/messages/conversations";
@@ -82,6 +83,9 @@ app.route("/auth/google", google);
 app.route("/auth/forgot-password", forgotPassword);
 app.route("/auth/reset-password", resetPassword);
 
+// Must be mounted BEFORE "/properties" so "/properties/mine" is not
+// captured by the "/:id" detail route.
+app.route("/properties/mine", propertiesMine);
 app.route("/properties", properties);
 
 app.route("/listings", createListing);

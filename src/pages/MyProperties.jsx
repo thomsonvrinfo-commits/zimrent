@@ -1,21 +1,18 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { zimrent } from "@/api/zimrentClient";
 import { useAuth } from "@/lib/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Image } from "@/components/ui/image";
 import {
   Plus,
   Building2,
   RefreshCw,
   Eye,
   EyeOff,
-  Loader2,
-  Megaphone
+  Loader2
 } from "lucide-react";
 import StateBadge from "@/components/StateBadge";
-import { PropertyVerificationBadge } from "@/components/VerificationBadge";
 import {
   EmptyState,
   LoadingState
@@ -27,32 +24,14 @@ import {
   PROPERTY_TYPES
 } from "@/lib/rental-utils";
 
-// Property authority is a separate concept from listing status (see the
-// Master Brief §5/§8) — a property can exist, and be seen here, long
-// before it has a listing at all. This local map is only for the badge
-// shown on this page; it deliberately doesn't touch the shared
-// LISTING_STATUS map in rental-utils.js.
+// Property AUTHORITY (may this user manage this property?) and LISTING
+// status (is it live in Discover?) are separate concepts, shown separately.
 const AUTHORITY_STATUS = {
-  not_submitted: {
-    label: "Authority not submitted",
-    color: "secondary"
-  },
-  pending: {
-    label: "Authority pending review",
-    color: "warning"
-  },
-  approved: {
-    label: "Authority approved",
-    color: "success"
-  },
-  rejected: {
-    label: "Authority rejected",
-    color: "destructive"
-  },
-  revoked: {
-    label: "Authority revoked",
-    color: "destructive"
-  }
+  none: { label: "Authority not submitted", color: "secondary" },
+  pending: { label: "Authority pending review", color: "warning" },
+  approved: { label: "Authority approved", color: "success" },
+  rejected: { label: "Authority rejected", color: "destructive" },
+  revoked: { label: "Authority revoked", color: "destructive" }
 };
 
 export default function MyProperties() {
@@ -60,127 +39,68 @@ export default function MyProperties() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
+  const justSubmitted =
+    searchParams.get("submitted") === "1" ||
+    searchParams.get("published") === "1";
+
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const [properties, setProperties] = useState([]);
   const [actionId, setActionId] = useState(null);
-  const [creatingListingId, setCreatingListingId] = useState(null);
 
-  const authorityPending = searchParams.get("authority_pending") === "1";
-
-  const loadProperties = async () => {
+  const loadProperties = useCallback(async () => {
     if (!user) return;
 
-    setLoading(true);
-
     try {
-      // properties.mine() (GET /properties/mine) returns every property
-      // the user owns regardless of listing status, plus their own
-      // property_authority status per property — unlike listings.mine()
-      // (GET /listings), which only returns properties that already have
-      // a listing and would hide anything still awaiting authority
-      // approval.
-      const results = await zimrent.properties.mine();
-
-      setProperties(
-        results.filter((item) => item.property)
-      );
-    } catch {
+      // Every property the user owns / holds authority for — with or
+      // without a listing. (listings.mine() alone hides any property that
+      // has no listing yet, which is exactly the state an owner is in after
+      // authority approval.)
+      const rows = await zimrent.properties.mine();
+      setProperties(rows || []);
+      setLoadError(null);
+    } catch (e) {
       setProperties([]);
+      setLoadError(e.message || "Unable to load your properties.");
     } finally {
       setLoading(false);
     }
-  };
+  }, [user]);
 
   useEffect(() => {
     loadProperties();
-  }, [user]);
+  }, [loadProperties]);
 
-  const toggleListingStatus = async (listing) => {
-    const currentStatus = listing.data?.status;
-    const newStatus =
-      currentStatus === "active"
-        ? "inactive"
-        : "active";
-
-    setActionId(listing.id);
-
+  const run = async (id, fn, fallbackMessage) => {
+    setActionId(id);
     try {
-      const updated = await zimrent.listings.update(
-        listing.id,
-        { status: newStatus }
-      );
-
-      setProperties((current) =>
-        current.map((item) =>
-          item.listing?.id === listing.id
-            ? {
-                ...item,
-                listing: updated
-              }
-            : item
-        )
-      );
-    } catch (e) {
-      alert(
-        e.message ||
-          "Unable to update listing status."
-      );
-    } finally {
-      setActionId(null);
-    }
-  };
-
-  const confirmAvailability = async (listing) => {
-    setActionId(listing.id);
-
-    try {
-      const updated = await zimrent.listings.update(
-        listing.id,
-        { status: "active" }
-      );
-
-      setProperties((current) =>
-        current.map((item) =>
-          item.listing?.id === listing.id
-            ? {
-                ...item,
-                listing: updated
-              }
-            : item
-        )
-      );
-    } catch (e) {
-      alert(
-        e.message ||
-          "Unable to confirm availability."
-      );
-    } finally {
-      setActionId(null);
-    }
-  };
-
-  // Only reachable once authority is approved and no listing exists yet
-  // (see the button's render guard below) — the backend still enforces
-  // hasApprovedAuthority() independently, so this is a UI convenience,
-  // not the source of truth.
-  const createListing = async (property) => {
-    setCreatingListingId(property.id);
-
-    try {
-      await zimrent.listings.create({
-        property_id: property.id
-      });
-
+      await fn();
       await loadProperties();
     } catch (e) {
-      alert(
-        e.message ||
-          "Unable to create listing. Please try again."
-      );
+      alert(e.message || fallbackMessage);
     } finally {
-      setCreatingListingId(null);
+      setActionId(null);
     }
   };
+
+  // Authority approved + no listing yet -> create the listing for THIS
+  // existing property. It starts as pending_verification; an admin review
+  // is what activates it.
+  const createListing = (property) =>
+    run(
+      property.id,
+      () => zimrent.listings.create({ property_id: property.id }),
+      "Unable to create listing."
+    );
+
+  // Owners may only move a listing to inactive / pending_verification
+  // (the API rejects anything else). Activation is admin-only.
+  const setListingStatus = (property, status) =>
+    run(
+      property.id,
+      () => zimrent.listings.update(property.listing_id, { status }),
+      "Unable to update listing."
+    );
 
   if (loading) {
     return (
@@ -197,39 +117,41 @@ export default function MyProperties() {
           </h1>
 
           <p className="text-muted-foreground text-sm mt-1">
-            Manage your property listings
+            Manage your properties and listings
           </p>
         </div>
 
-        <Button
-          onClick={() =>
-            navigate("/add-property")
-          }
-        >
+        <Button onClick={() => navigate("/add-property")}>
           <Plus className="w-4 h-4 mr-2" />
           Add property
         </Button>
       </div>
 
-      {authorityPending && (
-        <div className="mb-6 p-3 bg-warning/10 border border-warning/20 rounded-lg text-sm text-warning">
-          Property submitted. Your authority evidence is now
-          pending review — you'll be able to create a listing
-          once it's approved.
-        </div>
+      {justSubmitted && (
+        <Card className="border-warning/30 bg-warning/5 mb-5">
+          <CardContent className="p-4 text-sm text-warning">
+            Property submitted. Your authority evidence is now pending
+            review — you'll be able to create a listing once it's
+            approved.
+          </CardContent>
+        </Card>
       )}
 
-      {properties.length === 0 ? (
+      {loadError && (
+        <Card className="border-destructive/30 mb-5">
+          <CardContent className="p-4 text-sm text-destructive">
+            {loadError}
+          </CardContent>
+        </Card>
+      )}
+
+      {properties.length === 0 && !loadError ? (
         <EmptyState
           icon={Building2}
           title="No properties yet"
           description="Add your first property to start receiving tenant enquiries."
           action={
-            <Button
-              onClick={() =>
-                navigate("/add-property")
-              }
-            >
+            <Button onClick={() => navigate("/add-property")}>
               <Plus className="w-4 h-4 mr-2" />
               Add your first property
             </Button>
@@ -237,224 +159,200 @@ export default function MyProperties() {
         />
       ) : (
         <div className="space-y-4">
-          {properties.map(
-            ({ property, listing, authorityStatus }) => {
-              const propertyData =
-                property.data || {};
+          {properties.map((property) => {
+            const authorityKey =
+              property.my_authority_status || "none";
+            const authorityInfo =
+              AUTHORITY_STATUS[authorityKey] ||
+              AUTHORITY_STATUS.none;
 
-              const listingData =
-                listing?.data || {};
+            const hasListing = Boolean(property.listing_id);
+            const listingStatus = property.listing_status;
+            const listingInfo = hasListing
+              ? LISTING_STATUS[listingStatus] || {
+                  label: listingStatus,
+                  color: "secondary"
+                }
+              : null;
 
-              const statusInfo =
-                listing
-                  ? LISTING_STATUS[
-                      listingData.status
-                    ]
-                  : null;
+            const authorityApproved = authorityKey === "approved";
+            const busy = actionId === property.id;
 
-              const authorityInfo =
-                AUTHORITY_STATUS[authorityStatus] ||
-                AUTHORITY_STATUS.not_submitted;
+            return (
+              <Card
+                key={property.id}
+                className="border-border overflow-hidden"
+              >
+                <CardContent className="p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <Link
+                        to={`/property/${property.id}`}
+                        className="font-semibold font-heading hover:text-primary break-words"
+                      >
+                        {property.title || "Untitled property"}
+                      </Link>
 
-              const busy =
-                actionId === listing?.id;
+                      <p className="text-sm text-muted-foreground">
+                        {property.suburb
+                          ? `${property.suburb}, `
+                          : ""}
+                        {property.city}
+                        {property.property_type
+                          ? ` · ${
+                              PROPERTY_TYPES[
+                                property.property_type
+                              ] || property.property_type
+                            }`
+                          : ""}
+                      </p>
 
-              const creatingListing =
-                creatingListingId === property.id;
-
-              const canCreateListing =
-                authorityStatus === "approved" &&
-                !listing;
-
-              return (
-                <Card
-                  key={
-                    property.id
-                  }
-                  className="border-border overflow-hidden"
-                >
-                  <div className="flex flex-col sm:flex-row">
-                    <div className="sm:w-40 aspect-video sm:aspect-auto bg-muted flex-shrink-0">
-                      <Image
-                        src={
-                          propertyData
-                            .photos?.[0] ||
-                          "https://images.unsplash.com/photo-1568605114967-8130f3a36994?w=400"
-                        }
-                        alt={
-                          propertyData.title ||
-                          "Property"
-                        }
-                        className="w-full h-full"
-                        fittingType="fill"
-                      />
+                      <p className="text-sm font-medium mt-2">
+                        {formatCurrency(
+                          property.monthly_rent,
+                          property.currency
+                        )}
+                        /mo
+                      </p>
                     </div>
 
-                    <CardContent className="p-4 flex-1">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <Link
-                            to={`/property/${property.id}`}
-                            className="font-semibold font-heading hover:text-primary"
-                          >
-                            {propertyData.title}
-                          </Link>
+                    <div className="flex flex-col items-end gap-1.5 shrink-0">
+                      <StateBadge
+                        status={authorityKey}
+                        label={authorityInfo.label}
+                        color={authorityInfo.color}
+                      />
 
-                          <p className="text-sm text-muted-foreground">
-                            {propertyData.suburb
-                              ? `${propertyData.suburb}, `
-                              : ""}
-                            {propertyData.city}
-                            {propertyData.property_type
-                              ? ` · ${
-                                  PROPERTY_TYPES[
-                                    propertyData
-                                      .property_type
-                                  ] ||
-                                  propertyData.property_type
-                                }`
-                              : ""}
-                          </p>
+                      {listingInfo ? (
+                        <StateBadge
+                          status={listingStatus}
+                          label={listingInfo.label}
+                          color={listingInfo.color}
+                        />
+                      ) : (
+                        <StateBadge
+                          status="no_listing"
+                          label="No listing yet"
+                          color="secondary"
+                        />
+                      )}
+                    </div>
+                  </div>
 
-                          <div className="flex items-center gap-3 mt-2">
-                            <span className="text-sm font-medium">
-                              {formatCurrency(
-                                propertyData.monthly_rent,
-                                propertyData.currency
-                              )}
-                              /mo
-                            </span>
+                  {/* Next step for the owner */}
+                  <div className="flex flex-wrap items-center gap-2 mt-4">
+                    {property.listing_status === "active" && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        asChild
+                      >
+                        <Link to={`/property/${property.id}`}>
+                          <Eye className="w-3.5 h-3.5 mr-1.5" />
+                          View
+                        </Link>
+                      </Button>
+                    )}
 
-                            <PropertyVerificationBadge
-                              status={
-                                propertyData.verification_status
-                              }
-                              showLabel={false}
-                            />
-                          </div>
-                        </div>
+                    {/* Authority approved, nothing listed yet */}
+                    {authorityApproved && !hasListing && (
+                      <Button
+                        size="sm"
+                        onClick={() => createListing(property)}
+                        disabled={busy}
+                      >
+                        {busy ? (
+                          <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                        ) : (
+                          <Plus className="w-3.5 h-3.5 mr-1.5" />
+                        )}
+                        Create listing
+                      </Button>
+                    )}
 
-                        <div className="flex flex-col items-end gap-1.5">
-                          <StateBadge
-                            status={authorityStatus}
-                            label={authorityInfo.label}
-                            color={authorityInfo.color}
-                          />
+                    {/* Listing live: owner can pause it */}
+                    {hasListing && listingStatus === "active" && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          setListingStatus(property, "inactive")
+                        }
+                        disabled={busy}
+                      >
+                        {busy ? (
+                          <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                        ) : (
+                          <EyeOff className="w-3.5 h-3.5 mr-1.5" />
+                        )}
+                        Pause listing
+                      </Button>
+                    )}
 
-                          {statusInfo && (
-                            <StateBadge
-                              status={
-                                listingData.status
-                              }
-                              label={
-                                statusInfo.label
-                              }
-                              color={
-                                statusInfo.color
-                              }
-                            />
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="flex flex-wrap gap-2 mt-3">
+                    {/* Paused / rejected / draft: send back for review */}
+                    {hasListing &&
+                      authorityApproved &&
+                      ["inactive", "rejected", "draft"].includes(
+                        listingStatus
+                      ) && (
                         <Button
                           size="sm"
                           variant="outline"
-                          asChild
+                          onClick={() =>
+                            setListingStatus(
+                              property,
+                              "pending_verification"
+                            )
+                          }
+                          disabled={busy}
                         >
-                          <Link
-                            to={`/property/${property.id}`}
-                          >
-                            <Eye className="w-3.5 h-3.5 mr-1.5" />
-                            View
-                          </Link>
+                          {busy ? (
+                            <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                          ) : (
+                            <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
+                          )}
+                          Submit for review
                         </Button>
-
-                        {canCreateListing && (
-                          <Button
-                            size="sm"
-                            onClick={() =>
-                              createListing(
-                                property
-                              )
-                            }
-                            disabled={creatingListing}
-                          >
-                            {creatingListing ? (
-                              <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-                            ) : (
-                              <Megaphone className="w-3.5 h-3.5 mr-1.5" />
-                            )}
-                            Create listing
-                          </Button>
-                        )}
-
-                        {listing &&
-                          listingData.status ===
-                            "active" && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() =>
-                                confirmAvailability(
-                                  listing
-                                )
-                              }
-                              disabled={busy}
-                            >
-                              {busy ? (
-                                <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-                              ) : (
-                                <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
-                              )}
-
-                              Confirm availability
-                            </Button>
-                          )}
-
-                        {listing && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() =>
-                              toggleListingStatus(
-                                listing
-                              )
-                            }
-                            disabled={busy}
-                          >
-                            {busy ? (
-                              <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-                            ) : listingData.status ===
-                              "active" ? (
-                              <EyeOff className="w-3.5 h-3.5 mr-1.5" />
-                            ) : (
-                              <Eye className="w-3.5 h-3.5 mr-1.5" />
-                            )}
-
-                            {listingData.status ===
-                            "active"
-                              ? "Deactivate"
-                              : "Activate"}
-                          </Button>
-                        )}
-                      </div>
-
-                      {listingData.availability_confirmed_at && (
-                        <p className="text-xs text-muted-foreground mt-2">
-                          Last confirmed:{" "}
-                          {formatDate(
-                            listingData.availability_confirmed_at
-                          )}
-                        </p>
                       )}
-                    </CardContent>
                   </div>
-                </Card>
-              );
-            }
-          )}
+
+                  {/* Plain-language explanation of where this property is */}
+                  <p className="text-xs text-muted-foreground mt-3">
+                    {authorityKey === "none" &&
+                      "Submit evidence that you have the right to list this property."}
+                    {authorityKey === "pending" &&
+                      "Our team is reviewing your authority evidence. You can create a listing once it is approved."}
+                    {authorityKey === "rejected" &&
+                      "Your authority evidence was not accepted, so this property can't be listed."}
+                    {authorityKey === "revoked" &&
+                      "Your authority over this property was revoked, so it can't be listed."}
+                    {authorityApproved &&
+                      !hasListing &&
+                      "Authority approved. Create a listing to send it for review."}
+                    {authorityApproved &&
+                      listingStatus === "pending_verification" &&
+                      "Listing submitted — waiting for admin review before it appears in Discover."}
+                    {authorityApproved &&
+                      listingStatus === "active" &&
+                      "Your listing is live in Discover."}
+                    {authorityApproved &&
+                      listingStatus === "rejected" &&
+                      "Your listing was not approved. You can submit it for review again."}
+                    {authorityApproved &&
+                      listingStatus === "inactive" &&
+                      "Your listing is paused and hidden from Discover."}
+                  </p>
+
+                  {property.availability_confirmed_at && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Last confirmed:{" "}
+                      {formatDate(property.availability_confirmed_at)}
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
       )}
     </div>

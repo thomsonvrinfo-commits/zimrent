@@ -3,6 +3,7 @@ import {
   requireAuth,
   requireAdmin,
 } from "../../middleware/auth";
+import { hasApprovedAuthority } from "../../services/capabilities";
 
 type Env = {
   Bindings: {
@@ -37,6 +38,15 @@ const AUTHORITY_STATUSES = [
   "approved",
   "rejected",
   "revoked",
+] as const;
+
+// Admin-settable listing outcomes. Owners can never set these themselves
+// (see listings/manage.ts): only this review flow can make a listing
+// active, which is what Discover (GET /properties) filters on.
+const LISTING_REVIEW_STATUSES = [
+  "active",
+  "rejected",
+  "inactive",
 ] as const;
 
 type IdentityStatus = (typeof IDENTITY_STATUSES)[number];
@@ -533,6 +543,183 @@ adminVerification.patch(
           created_date,
           updated_date
         FROM property_authority
+        WHERE id = ?
+      `)
+      .bind(id)
+      .first();
+
+    return c.json({
+      data: updated,
+    });
+  }
+);
+
+// GET /admin/verification/listings
+adminVerification.get("/verification/listings", async (c) => {
+  const result = await c.env.DB
+    .prepare(`
+      SELECT
+        l.id,
+        l.property_id,
+        l.created_by_id,
+        l.status,
+        l.availability_confirmed_at,
+        l.available_from,
+        l.created_date,
+        l.updated_date,
+        u.email,
+        u.display_name,
+        p.title,
+        p.address,
+        p.city,
+        p.suburb,
+        p.monthly_rent,
+        (
+          SELECT pa.status
+          FROM property_authority pa
+          WHERE pa.property_id = l.property_id
+            AND pa.user_id = l.created_by_id
+          LIMIT 1
+        ) AS owner_authority_status
+      FROM listings l
+      JOIN users u ON u.id = l.created_by_id
+      JOIN properties p ON p.id = l.property_id
+      ORDER BY
+        CASE
+          WHEN l.status = pending_verification THEN 0
+          ELSE 1
+        END,
+        l.created_date DESC
+    `)
+    .all();
+
+  return c.json({
+    data: result.results,
+  });
+});
+
+// PATCH /admin/verification/listings/:id
+//
+// Listing activation is deliberately separate from property authority:
+// approving authority only lets the owner CREATE a listing; this review
+// is what makes it ACTIVE (visible in Discover).
+adminVerification.patch(
+  "/verification/listings/:id",
+  async (c) => {
+    const adminId = c.get("userId");
+    const id = c.req.param("id");
+
+    const body = await c.req.json<{
+      status?: string;
+    }>();
+
+    const status = body.status;
+
+    if (
+      !status ||
+      !isAllowedStatus(status, LISTING_REVIEW_STATUSES)
+    ) {
+      return c.json(
+        { message: "Invalid listing review status" },
+        400
+      );
+    }
+
+    const existing = await c.env.DB
+      .prepare(`
+        SELECT id, property_id, created_by_id, status
+        FROM listings
+        WHERE id = ?
+        LIMIT 1
+      `)
+      .bind(id)
+      .first<{
+        id: string;
+        property_id: string;
+        created_by_id: string;
+        status: string;
+      }>();
+
+    if (!existing) {
+      return c.json(
+        { message: "Listing not found" },
+        404
+      );
+    }
+
+    // Same separation-of-duties rule as property authority review.
+    if (existing.created_by_id === adminId) {
+      return c.json(
+        { message: "You cannot review your own listing" },
+        403
+      );
+    }
+
+    // A listing may only go live while its owner still holds approved
+    // authority over the property (authority can be revoked after the
+    // listing was created).
+    if (status === "active") {
+      const authorized = await hasApprovedAuthority(
+        c.env.DB,
+        existing.created_by_id,
+        existing.property_id
+      );
+
+      if (!authorized) {
+        return c.json(
+          {
+            message:
+              "Cannot activate: the owner does not have approved authority over this property",
+          },
+          409
+        );
+      }
+    }
+
+    const now = new Date().toISOString();
+
+    await c.env.DB
+      .prepare(`
+        UPDATE listings
+        SET status = ?,
+            availability_confirmed_at = ?,
+            updated_date = ?
+        WHERE id = ?
+      `)
+      .bind(
+        status,
+        status === "active" ? now : null,
+        now,
+        id
+      )
+      .run();
+
+    await writeAuditLog(
+      c.env.DB,
+      adminId,
+      "listing_reviewed",
+      "listing",
+      id,
+      {
+        property_id: existing.property_id,
+        owner_id: existing.created_by_id,
+        previous_status: existing.status,
+        new_status: status,
+      }
+    );
+
+    const updated = await c.env.DB
+      .prepare(`
+        SELECT
+          id,
+          property_id,
+          created_by_id,
+          status,
+          availability_confirmed_at,
+          available_from,
+          created_date,
+          updated_date
+        FROM listings
         WHERE id = ?
       `)
       .bind(id)
