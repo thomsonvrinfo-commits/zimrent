@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { zimrent } from "@/api/zimrentClient";
+import { useProfile } from "@/hooks/useProfile";
 import { useAuth } from "@/lib/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -28,6 +29,7 @@ const STATUS_COLOR = {
 
 export default function AdminDashboard() {
   const { user } = useAuth();
+const { isAdmin } = useProfile();
   const navigate = useNavigate();
 
   const [loading, setLoading] = useState(true);
@@ -65,9 +67,9 @@ export default function AdminDashboard() {
     // The real authorization boundary is the API's requireAdmin middleware
     // (live is_admin DB check) — every call below is enforced there
     // regardless of what happens in this component.
-    if (!user.is_admin) { navigate("/"); return; }
+    if (!isAdmin) { navigate("/"); return; }
     loadQueues();
-  }, [user, navigate, loadQueues]);
+  }, [user, isAdmin, navigate, loadQueues]);
 
   const runReview = async (id, action) => {
     setActioningId(id);
