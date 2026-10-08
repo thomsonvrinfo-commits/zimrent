@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { zimrent } from "@/api/zimrentClient";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -48,6 +48,8 @@ const SUBURBS = {
 
 export default function AddProperty() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+const authorityFor = searchParams.get("authority_for");
   const [step, setStep] = useState(1);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -55,6 +57,25 @@ export default function AddProperty() {
   const [photos, setPhotos] = useState([]);
   const [authorityFile, setAuthorityFile] = useState(null);
   const [authorityAcknowledged, setAuthorityAcknowledged] = useState(false);
+  const loadExistingProperty = async () => {
+  if (!authorityFor) return;
+
+  try {
+    const properties = await zimrent.properties.mine();
+    const property = (properties || []).find(
+      (item) => item.id === authorityFor
+    );
+
+    if (!property) {
+      throw new Error("Property not found.");
+    }
+
+    setCreatedProperty(property);
+    setStep(3);
+  } catch (e) {
+    setError(e.message || "Unable to load the property.");
+  }
+};
 
   const [form, setForm] = useState({
     title: "",
@@ -81,6 +102,11 @@ export default function AddProperty() {
     setForm((prev) => ({ ...prev, [key]: value }));
 
   const suburbs = SUBURBS[form.city] || [];
+  useEffect(() => {
+  if (authorityFor) {
+    loadExistingProperty();
+  }
+}, [authorityFor]);
 
   const createProperty = async () => {
     if (!form.title.trim() || !form.suburb.trim()) {

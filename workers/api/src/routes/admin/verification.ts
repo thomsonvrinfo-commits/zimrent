@@ -586,7 +586,7 @@ adminVerification.get("/verification/listings", async (c) => {
       JOIN properties p ON p.id = l.property_id
       ORDER BY
         CASE
-          WHEN l.status = pending_verification THEN 0
+          WHEN l.status = 'pending_verification' THEN 0
           ELSE 1
         END,
         l.created_date DESC

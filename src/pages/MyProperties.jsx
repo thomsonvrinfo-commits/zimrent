@@ -191,6 +191,9 @@ export default function MyProperties() {
               : null;
 
             const authorityApproved = authorityKey === "approved";
+            const authoritySubmissionNeeded = ["none", "rejected", "revoked"].includes(
+  authorityKey
+);
             const busy = actionId === property.id;
 
             return (
@@ -333,8 +336,31 @@ export default function MyProperties() {
 
                   {/* Plain-language explanation of where this property is */}
                   <p className="text-xs text-muted-foreground mt-3">
-                    {authorityKey === "none" &&
-                      "Submit evidence that you have the right to list this property."}
+                    {authoritySubmissionNeeded && (
+  <div className="flex flex-col gap-2">
+    <p className="text-sm text-muted-foreground">
+      {authorityKey === "none"
+        ? "Submit evidence that you have the right to list this property."
+        : "Your previous authority submission was not approved. Submit new evidence to try again."}
+    </p>
+
+    <Button
+      size="sm"
+      variant="outline"
+      onClick={() =>
+        navigate(
+          `/add-property?authority_for=${encodeURIComponent(property.id)}`
+        )
+      }
+      disabled={busy}
+    >
+      <RefreshCw className="mr-2 h-4 w-4" />
+      {authorityKey === "none"
+        ? "Submit authority evidence"
+        : "Resubmit authority evidence"}
+    </Button>
+  </div>
+)}
                     {authorityKey === "pending" &&
                       "Our team is reviewing your authority evidence. You can create a listing once it is approved."}
                     {authorityKey === "rejected" &&

@@ -74,7 +74,15 @@ export default function AppLayout() {
   const navItems = capabilitiesLoading
     ? (LEGACY_ROLE_NAV[role] || LEGACY_ROLE_NAV.tenant)
     : buildCapabilityNav(capabilities);
-  const effectiveNav = isAdmin ? ADMIN_NAV : navItems;
+  const effectiveNav = isAdmin
+  ? [
+      ...ADMIN_NAV,
+      NAV_ITEMS.myProperties,
+      ...(capabilities.includes("listing")
+        ? [NAV_ITEMS.addProperty]
+        : []),
+    ]
+  : navItems;
 
   useEffect(() => {
     setMobileOpen(false);
