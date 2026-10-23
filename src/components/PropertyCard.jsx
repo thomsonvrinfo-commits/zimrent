@@ -5,11 +5,14 @@ import { PropertyVerificationBadge, IdentityBadge } from "@/components/Verificat
 import StateBadge from "@/components/StateBadge";
 import { PROPERTY_TYPES, LISTING_STATUS, formatCurrency, isStaleAvailability } from "@/lib/rental-utils";
 
-export default function PropertyCard({ property, listing, ownerProfile, saved, onToggleSave }) {
+export default function PropertyCard({ property, listing, ownerProfile, coverPhotoUrl, saved, onToggleSave }) {
   if (!property || !listing) return null;
   const statusInfo = LISTING_STATUS[listing.data?.status] || LISTING_STATUS.inactive;
+  // coverPhotoUrl comes from the property's real uploaded media (see Home /
+  // TenantDashboard). Falls back to a generic placeholder only when the
+  // property has no photos yet.
   const photos = property.data?.photos || [];
-  const photoUrl = photos[0] || "https://images.unsplash.com/photo-1568605114967-8130f3a36994?w=800";
+  const photoUrl = coverPhotoUrl || photos[0] || "https://images.unsplash.com/photo-1568605114967-8130f3a36994?w=800";
   const isAvailable = listing.data?.status === "active";
   const stale = isStaleAvailability(listing.data?.availability_confirmed_at);
 
@@ -40,7 +43,7 @@ export default function PropertyCard({ property, listing, ownerProfile, saved, o
           )}
           <div className="absolute bottom-3 left-3 right-3 flex items-end justify-between">
             <div className="text-white">
-              <p className="text-xl font-bold font-heading">{formatCurrency(listing.data?.monthly_rent, listing.data?.currency)}<span className="text-sm font-normal opacity-90">/month</span></p>
+              <p className="text-xl font-bold font-heading">{formatCurrency(property.data?.monthly_rent ?? listing.data?.monthly_rent, property.data?.currency || listing.data?.currency)}<span className="text-sm font-normal opacity-90">/month</span></p>
             </div>
           </div>
         </div>
@@ -56,9 +59,6 @@ export default function PropertyCard({ property, listing, ownerProfile, saved, o
         <div className="flex items-center gap-4 mt-3 text-sm text-muted-foreground">
           <span className="flex items-center gap-1.5"><Bed className="w-4 h-4" /> {property.data?.bedrooms} bed</span>
           <span className="flex items-center gap-1.5"><Bath className="w-4 h-4" /> {property.data?.bathrooms} bath</span>
-          {property.data?.parking_spaces > 0 && (
-            <span className="flex items-center gap-1.5"><Car className="w-4 h-4" /> {property.data.parking_spaces}</span>
-          )}
         </div>
         <div className="flex items-center justify-between mt-3 pt-3 border-t border-border">
           <span className="text-xs text-muted-foreground">{PROPERTY_TYPES[property.data?.property_type]}</span>

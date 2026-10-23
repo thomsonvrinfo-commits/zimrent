@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { requireAuth } from "../../middleware/auth";
+import { createNotification } from "../../services/notifications";
 
 type Env = {
   Bindings: {
@@ -139,6 +140,20 @@ sendMessage.post("/:id/messages", async (c) => {
   )
     .bind(now, now, conversationId)
     .run();
+
+  // Tell the other participant. Repeated messages in the same conversation
+  // refresh one unread notification instead of piling up.
+  await createNotification(c.env.DB, {
+    userId:
+      conversation.tenant_id === userId
+        ? conversation.landlord_id
+        : conversation.tenant_id,
+    type: "message",
+    title: "New message",
+    message: "You have a new message about a property.",
+    link: `/messages/${conversationId}`,
+    dedupe: true,
+  });
 
   return c.json(
     {

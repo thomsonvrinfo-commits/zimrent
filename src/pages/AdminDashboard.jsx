@@ -8,7 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Shield, UserCheck, Building2, FileCheck, ListChecks,
-  CheckCircle2, XCircle, Eye, Loader2
+  CheckCircle2, XCircle, Eye, Loader2, X, ExternalLink
 } from "lucide-react";
 import StateBadge from "@/components/StateBadge";
 import { EmptyState, LoadingState } from "@/components/EmptyState";
@@ -40,6 +40,7 @@ const { isAdmin } = useProfile();
   const [listingQueue, setListingQueue] = useState([]);
   const [actioningId, setActioningId] = useState(null);
   const [viewingDocId, setViewingDocId] = useState(null);
+  const [preview, setPreview] = useState(null); // { url, type, title }
 
   const loadQueues = useCallback(async () => {
     try {
@@ -83,19 +84,23 @@ const { isAdmin } = useProfile();
     }
   };
 
-  const viewDocument = async (kind, documentId) => {
+  // Inline evidence preview (instead of opening a raw blob: tab).
+  const viewDocument = async (kind, documentId, title = "Evidence document") => {
     if (!documentId) return;
     setViewingDocId(documentId);
     try {
-      const url = await zimrent.admin.documentUrl(kind, documentId);
-      window.open(url, "_blank", "noopener,noreferrer");
-      // Give the new tab a chance to load the blob before releasing it.
-      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      const { url, type } = await zimrent.admin.documentPreview(kind, documentId);
+      setPreview({ url, type, title });
     } catch (e) {
       alert(e.message || "Could not load that document.");
     } finally {
       setViewingDocId(null);
     }
+  };
+
+  const closePreview = () => {
+    if (preview?.url) URL.revokeObjectURL(preview.url);
+    setPreview(null);
   };
 
   if (loading) return <LoadingState label="Loading admin console..." />;
@@ -154,7 +159,7 @@ const { isAdmin } = useProfile();
                       size="sm"
                       variant="outline"
                       disabled={viewingDocId === r.evidence_document_id}
-                      onClick={() => viewDocument("identity", r.evidence_document_id)}
+                      onClick={() => viewDocument("identity", r.evidence_document_id, `ID — ${r.display_name || r.email}`)}
                     >
                       {viewingDocId === r.evidence_document_id
                         ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -250,7 +255,7 @@ const { isAdmin } = useProfile();
                       size="sm"
                       variant="outline"
                       disabled={viewingDocId === r.evidence_document_id}
-                      onClick={() => viewDocument("property", r.evidence_document_id)}
+                      onClick={() => viewDocument("property", r.evidence_document_id, `Authority evidence — ${r.title || "property"}`)}
                     >
                       {viewingDocId === r.evidence_document_id
                         ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -341,6 +346,60 @@ const { isAdmin } = useProfile();
           ))}
         </TabsContent>
       </Tabs>
+
+      {preview && (
+        <div
+          className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-3"
+          onClick={closePreview}
+        >
+          <div
+            className="bg-background rounded-xl shadow-xl w-full max-w-3xl max-h-[92vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-border">
+              <p className="font-medium text-sm truncate">{preview.title}</p>
+              <div className="flex items-center gap-2 shrink-0">
+                <a
+                  href={preview.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-primary hover:underline inline-flex items-center gap-1"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" /> Open
+                </a>
+                <Button size="sm" variant="outline" onClick={closePreview}>
+                  <X className="w-3.5 h-3.5 mr-1" /> Close
+                </Button>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-auto p-3 bg-muted/30">
+              {preview.type.startsWith("image/") ? (
+                <img
+                  src={preview.url}
+                  alt={preview.title}
+                  className="max-h-[75vh] w-auto max-w-full mx-auto object-contain"
+                />
+              ) : preview.type === "application/pdf" ? (
+                <div className="space-y-2">
+                  <iframe
+                    src={preview.url}
+                    title={preview.title}
+                    className="w-full h-[70vh] rounded border border-border bg-white"
+                  />
+                  <p className="text-xs text-muted-foreground text-center">
+                    PDF not showing? Tap <strong>Open</strong> above to view it in a new tab.
+                  </p>
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground p-6 text-center">
+                  This file type can't be previewed here. Use <strong>Open</strong> to view or download it.
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -29,6 +29,14 @@ properties.get("/", async (c) => {
   const petsAllowed = c.req.query("pets_allowed");
   const furnished = c.req.query("furnished");
   const gated = c.req.query("gated");
+  const minBathrooms = c.req.query("min_bathrooms");
+  // Free-text search over title / suburb / city / address (wildcards stripped).
+  const q = (c.req.query("q") || "").trim().replace(/[%_]/g, "");
+  const offsetParam = Number(c.req.query("offset") || "0");
+  const offset =
+    Number.isFinite(offsetParam) && offsetParam > 0
+      ? Math.floor(offsetParam)
+      : 0;
 
   const limitParam = Number(c.req.query("limit") || "20");
   const limit = Math.min(
@@ -81,6 +89,24 @@ properties.get("/", async (c) => {
     }
   }
 
+  if (minBathrooms) {
+    const value = Number(minBathrooms);
+
+    if (Number.isFinite(value)) {
+      conditions.push("p.bathrooms >= ?");
+      bindings.push(value);
+    }
+  }
+
+  if (q) {
+    const like = `%${q.toLowerCase()}%`;
+
+    conditions.push(
+      "(LOWER(p.title) LIKE ? OR LOWER(p.suburb) LIKE ? OR LOWER(p.city) LIKE ? OR LOWER(p.address) LIKE ?)"
+    );
+    bindings.push(like, like, like, like);
+  }
+
   if (petsAllowed === "true") {
     conditions.push("p.pets_allowed = 1");
   }
@@ -93,46 +119,11 @@ properties.get("/", async (c) => {
     conditions.push("p.gated = 1");
   }
 
-  const sql = `
-    SELECT
-      p.*,
-      l.id AS listing_id,
-      l.status AS listing_status,
-      l.available_from,
-      l.availability_confirmed_at
-    FROM properties p
-    INNER JOIN listings l
-      ON l.property_id = p.id
-    WHERE ${conditions.join(" AND ")}
-    ORDER BY p.created_date DESC
-    LIMIT ?
-  `;
+  const where = conditions.join(" AND ");
 
-  bindings.push(limit);
-
-  const result = await c.env.DB
-    .prepare(sql)
-    .bind(...bindings)
-    .all();
-
-  return c.json({
-    data: result.results,
-    count: result.results.length,
-  });
-});
-
-// PROTECTED: the authenticated user's own properties, regardless of
-// listing status. Distinct from the public "/" route above, which only
-// returns properties that already have an active listing — a property
-// awaiting authority approval would never appear there. Registered before
-// "/:id" so the literal "mine" segment isn't swallowed by the :id param.
-//
-// Also joins in the caller's own property_authority status per property
-// (aliased to my_authority_status, since properties already has its own
-// legacy authority_status column) so the frontend can show it.
-properties.get("/mine", requireAuth, async (c) => {
-  const userId = c.get("userId");
-
+  // One round trip per page: the cover photo id and the owner's public
+  // name / identity badge ride along, so Discover no longer makes a media
+  // request and a profile request for every card.
   const sql = `
     SELECT
       p.*,
@@ -140,27 +131,58 @@ properties.get("/mine", requireAuth, async (c) => {
       l.status AS listing_status,
       l.available_from,
       l.availability_confirmed_at,
-      pa.status AS my_authority_status,
-      pa.id AS my_authority_id,
-      pa.reviewed_at AS my_authority_reviewed_at
+      (
+        SELECT pm.id
+        FROM property_media pm
+        WHERE pm.property_id = p.id
+        ORDER BY pm.sort_order ASC, pm.created_date ASC
+        LIMIT 1
+      ) AS cover_media_id,
+      (
+        SELECT pr.display_name
+        FROM profiles pr
+        WHERE pr.created_by_id = p.created_by_id
+        LIMIT 1
+      ) AS owner_display_name,
+      (
+        SELECT pr.identity_status
+        FROM profiles pr
+        WHERE pr.created_by_id = p.created_by_id
+        LIMIT 1
+      ) AS owner_identity_status
     FROM properties p
-    LEFT JOIN listings l
+    INNER JOIN listings l
       ON l.property_id = p.id
-    LEFT JOIN property_authority pa
-      ON pa.property_id = p.id
-     AND pa.user_id = ?
-    WHERE p.created_by_id = ?
-    ORDER BY p.created_date DESC
+    WHERE ${where}
+    ORDER BY p.created_date DESC, p.id ASC
+    LIMIT ? OFFSET ?
   `;
 
-  const result = await c.env.DB
-    .prepare(sql)
-    .bind(userId, userId)
-    .all();
+  const countSql = `
+    SELECT COUNT(*) AS total
+    FROM properties p
+    INNER JOIN listings l
+      ON l.property_id = p.id
+    WHERE ${where}
+  `;
+
+  const [result, totalRow] = await Promise.all([
+    c.env.DB
+      .prepare(sql)
+      .bind(...bindings, limit, offset)
+      .all(),
+    c.env.DB
+      .prepare(countSql)
+      .bind(...bindings)
+      .first<{ total: number }>(),
+  ]);
 
   return c.json({
     data: result.results,
     count: result.results.length,
+    total: totalRow?.total ?? result.results.length,
+    limit,
+    offset,
   });
 });
 

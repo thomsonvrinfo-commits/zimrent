@@ -193,10 +193,9 @@ const listingData = listing?.data || {};
 const status = listingData.status;
 const statusInfo = listing ? LISTING_STATUS[status] : null;
 
-const canReserve =
-  listing &&
-  status === "active" &&
-  listing.created_by_id !== user?.id;
+// Reservations have no backend yet, so the Reserve action is switched off.
+// Messaging and viewing requests (which are fully built) stay available.
+const canReserve = false;
 
 const isOwner =
   listing &&
@@ -447,127 +446,71 @@ const photos = propertyMedia
 
           <div className="bg-card border border-border rounded-2xl p-5">
             <h2 className="font-semibold font-heading mb-4">
-              Utilities & amenities
+              Utilities & features
             </h2>
 
-            <div className="grid grid-cols-2 gap-4">
-              <UtilityRow
-                icon={Droplets}
-                label="Water"
-                value={`${WATER_SOURCES[d.water_source] || d.water_source} · ${
-                  WATER_RELIABILITY[d.water_reliability] ||
-                  d.water_reliability
-                }`}
-              />
-
-              <UtilityRow
-                icon={Zap}
-                label="Electricity"
-                value={
-                  ELECTRICITY_OPTIONS[d.electricity] ||
-                  d.electricity
-                }
-              />
-
-              <UtilityRow
-                icon={Battery}
-                label="Backup power"
-                value={
-                  BACKUP_POWER[d.backup_power] ||
-                  d.backup_power
-                }
-              />
-
-              <UtilityRow
-                icon={Wifi}
-                label="Internet"
-                value={
-                  d.internet === "available"
-                    ? "Available"
-                    : d.internet === "not_available"
-                    ? "Not available"
-                    : "Unknown"
-                }
-              />
-
-              <UtilityRow
-                icon={Trash2}
-                label="Refuse collection"
-                value={d.refuse_collection ? "Yes" : "No"}
-              />
-
-              <UtilityRow
-                icon={Fuel}
-                label="Gas"
-                value={d.gas === "none" ? "None" : d.gas}
-              />
-            </div>
-          </div>
-
-          <div className="bg-card border border-border rounded-2xl p-5">
-            <h2 className="font-semibold font-heading mb-4">
-              Security features
-            </h2>
-
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-              {[
-                { label: "Walled", value: d.walled },
-                { label: "Gated", value: d.gated },
-                { label: "Security guard", value: d.security_guard },
-                { label: "CCTV", value: d.cctv },
-                { label: "Alarm", value: d.alarm },
-                { label: "Secure parking", value: d.secure_parking }
-              ].map((f) => (
-                <div
-                  key={f.label}
-                  className={`flex items-center gap-2 text-sm ${
-                    f.value
-                      ? "text-foreground"
-                      : "text-muted-foreground/60"
-                  }`}
-                >
-                  {f.value ? (
-                    <CheckCircle2 className="w-4 h-4 text-success" />
-                  ) : (
-                    <span className="w-4 h-4 rounded-full border border-muted-foreground/30" />
-                  )}
-                  {f.label}
+            <div className="space-y-4 text-sm">
+              <div className="flex items-start gap-2">
+                <Zap className="w-4 h-4 mt-0.5 text-muted-foreground shrink-0" />
+                <div>
+                  <p className="font-medium">Utilities included</p>
+                  <p className="text-muted-foreground whitespace-pre-wrap">
+                    {d.utilities_included === true || d.utilities_included === 1
+                      ? "Included in the rent"
+                      : d.utilities_included === false || d.utilities_included === 0
+                      ? "Not included in the rent"
+                      : d.utilities_included
+                      ? String(d.utilities_included)
+                      : "Not specified — ask the owner."}
+                  </p>
                 </div>
-              ))}
-            </div>
-          </div>
+              </div>
 
-          <div className="bg-card border border-border rounded-2xl p-5">
-            <h2 className="font-semibold font-heading mb-4">
-              House rules
-            </h2>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {[
+                  { label: "Furnished", value: d.furnished },
+                  { label: "Gated", value: d.gated },
+                  { label: "Pets allowed", value: d.pets_allowed }
+                ].map((f) => (
+                  <div
+                    key={f.label}
+                    className={`flex items-center gap-2 ${
+                      f.value
+                        ? "text-foreground"
+                        : "text-muted-foreground/60"
+                    }`}
+                  >
+                    {f.value ? (
+                      <CheckCircle2 className="w-4 h-4 text-success" />
+                    ) : (
+                      <span className="w-4 h-4 rounded-full border border-muted-foreground/30" />
+                    )}
+                    {f.label}
+                  </div>
+                ))}
+              </div>
 
-            <div className="grid grid-cols-2 gap-3 text-sm">
-              <RuleRow
-                label="Pets allowed"
-                value={d.pets_allowed}
-              />
-              <RuleRow
-                label="Smoking allowed"
-                value={d.smoking_allowed}
-              />
-              <RuleRow
-                label="Visitors allowed"
-                value={d.visitors_allowed}
-              />
-              <RuleRow
-                label="Children allowed"
-                value={d.children_allowed}
-              />
-              <RuleRow
-                label="Subletting allowed"
-                value={d.subletting_allowed}
-              />
+              {d.security_features && (
+                <div className="flex items-start gap-2">
+                  <ShieldCheck className="w-4 h-4 mt-0.5 text-muted-foreground shrink-0" />
+                  <div>
+                    <p className="font-medium">Security</p>
+                    <p className="text-muted-foreground whitespace-pre-wrap">
+                      {d.security_features}
+                    </p>
+                  </div>
+                </div>
+              )}
 
-              {d.max_occupancy && (
-                <div className="flex items-center gap-2">
-                  <Users className="w-4 h-4 text-muted-foreground" />
-                  Max {d.max_occupancy} occupants
+              {d.rules && (
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 mt-0.5 text-muted-foreground shrink-0" />
+                  <div>
+                    <p className="font-medium">House rules</p>
+                    <p className="text-muted-foreground whitespace-pre-wrap">
+                      {d.rules}
+                    </p>
+                  </div>
                 </div>
               )}
             </div>

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Outlet, Link, useLocation, useNavigate } from "react-router-dom";
 import { zimrent } from "@/api/zimrentClient";
 import { useAuth } from "@/lib/AuthContext";
@@ -58,6 +58,18 @@ function buildCapabilityNav(capabilities) {
   return items;
 }
 
+function formatNotificationTime(value) {
+  if (!value) return "";
+  const then = new Date(value);
+  const minutes = Math.round((Date.now() - then.getTime()) / 60000);
+  if (!Number.isFinite(minutes)) return "";
+  if (minutes < 1) return "Just now";
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} h ago`;
+  return then.toLocaleDateString();
+}
+
 export default function AppLayout() {
   const { user, logout } = useAuth();
   const { profile, loading, isAdmin, capabilities, capabilitiesLoading } = useProfile();
@@ -74,7 +86,9 @@ export default function AppLayout() {
   const navItems = capabilitiesLoading
     ? (LEGACY_ROLE_NAV[role] || LEGACY_ROLE_NAV.tenant)
     : buildCapabilityNav(capabilities);
-  const effectiveNav = isAdmin
+  const effectiveNav = !user
+  ? [NAV_ITEMS.discover]
+  : isAdmin
   ? [
       ...ADMIN_NAV,
       NAV_ITEMS.myProperties,
@@ -88,26 +102,38 @@ export default function AppLayout() {
     setMobileOpen(false);
   }, [location.pathname]);
 
-  useEffect(() => {
+  // ---- Notifications (GET /notifications) ----
+  // Loaded when you sign in or change page, and refreshed every minute while
+  // the tab is visible. A failed refresh keeps whatever is already shown.
+  const loadNotifications = useCallback(async () => {
     if (!user) return;
-    let active = true;
-    (async () => {
-      try {
-        const notifs = await zimrent.entities.Notification.filter({ user_id: user.id }, "-created_date", 20);
-        if (active) setNotifications(notifs || []);
-      } catch (e) { /* ignore */ }
-    })();
-    return () => { active = false; };
-  }, [user, location.pathname]);
+    try {
+      setNotifications((await zimrent.notifications.list()) || []);
+    } catch (e) { /* keep the current list */ }
+  }, [user]);
 
-  const unreadCount = notifications.filter(n => !n.data?.read).length;
+  useEffect(() => {
+    if (!user) { setNotifications([]); return; }
+    loadNotifications();
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") loadNotifications();
+    }, 60000);
+    return () => clearInterval(timer);
+  }, [user, location.pathname, loadNotifications]);
+
+  const unreadCount = notifications.filter((n) => !n.read).length;
+  const unreadMessages = notifications.filter((n) => !n.read && n.type === "message").length;
 
   const markAllRead = async () => {
-    const unread = notifications.filter(n => !n.data?.read);
-    for (const n of unread) {
-      try { await zimrent.entities.Notification.update(n.id, { read: true }); } catch (e) {}
-    }
-    setNotifications(notifications.map(n => ({ ...n, data: { ...n.data, read: true } })));
+    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    try { await zimrent.notifications.markAllRead(); } catch (e) { /* ignore */ }
+  };
+
+  const openNotification = async (n) => {
+    setNotifOpen(false);
+    if (n.read) return;
+    setNotifications((prev) => prev.map((x) => (x.id === n.id ? { ...x, read: true } : x)));
+    try { await zimrent.notifications.markRead(n.id); } catch (e) { /* ignore */ }
   };
 
   const handleLogout = () => {
@@ -142,13 +168,14 @@ export default function AppLayout() {
                   active ? "bg-sidebar-primary text-sidebar-primary-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent")}>
                 <Icon className="w-4.5 h-4.5" style={{ width: 18, height: 18 }} />
                 {item.label}
-                {item.label === "Messages" && unreadCount > 0 && (
-                  <span className="ml-auto bg-destructive text-destructive-foreground text-[10px] font-bold rounded-full px-1.5 py-0.5 min-w-[18px] text-center">{unreadCount}</span>
+                {item.label === "Messages" && unreadMessages > 0 && (
+                  <span className="ml-auto bg-destructive text-destructive-foreground text-[10px] font-bold rounded-full px-1.5 py-0.5 min-w-[18px] text-center">{unreadMessages}</span>
                 )}
               </Link>
             );
           })}
         </nav>
+        {user ? (
         <div className="px-3 py-3 border-t border-sidebar-border">
           <Link to="/profile" className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-sidebar-accent transition-colors">
             <Avatar className="w-9 h-9">
@@ -163,6 +190,12 @@ export default function AppLayout() {
             <LogOut className="w-4 h-4" /> Sign out
           </button>
         </div>
+        ) : (
+        <div className="px-3 py-3 border-t border-sidebar-border space-y-2">
+          <Link to="/login" className="block w-full text-center px-3 py-2.5 rounded-lg text-sm font-medium bg-primary text-primary-foreground hover:opacity-90 transition-opacity">Sign in</Link>
+          <Link to="/register" className="block w-full text-center px-3 py-2.5 rounded-lg text-sm font-medium text-sidebar-foreground hover:bg-sidebar-accent transition-colors">Create account</Link>
+        </div>
+        )}
       </aside>
 
       {/* Mobile header */}
@@ -177,12 +210,14 @@ export default function AppLayout() {
             </div>
             <span className="font-heading font-bold">Dzimba</span>
           </Link>
+          {user ? (
           <button onClick={() => setNotifOpen(!notifOpen)} className="relative p-2 -mr-2">
             <Bell className="w-5 h-5" />
             {unreadCount > 0 && (
               <span className="absolute top-1 right-1 bg-destructive text-destructive-foreground text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center">{unreadCount}</span>
             )}
           </button>
+          ) : <span className="w-9" />}
         </div>
       </header>
 
@@ -213,21 +248,28 @@ export default function AppLayout() {
                 );
               })}
             </nav>
+            {user ? (
             <div className="px-3 py-3 border-t border-border">
               <button onClick={handleLogout} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-muted-foreground hover:bg-muted">
                 <LogOut className="w-4 h-4" /> Sign out
               </button>
             </div>
+            ) : (
+            <div className="px-3 py-3 border-t border-border space-y-2">
+              <Link to="/login" className="block w-full text-center px-3 py-2.5 rounded-lg text-sm font-medium bg-primary text-primary-foreground">Sign in</Link>
+              <Link to="/register" className="block w-full text-center px-3 py-2.5 rounded-lg text-sm font-medium text-foreground hover:bg-muted">Create account</Link>
+            </div>
+            )}
           </div>
         </div>
       )}
 
       {/* Desktop notification panel */}
-      <div className="hidden lg:block">
+      <div>
         {notifOpen && (
           <>
             <div className="fixed inset-0 z-30" onClick={() => setNotifOpen(false)} />
-            <div className="fixed top-16 right-6 w-80 bg-card border border-border rounded-xl shadow-xl z-40 animate-scale-in">
+            <div className="fixed top-14 lg:top-16 right-2 lg:right-6 w-[calc(100vw-1rem)] max-w-sm lg:w-80 bg-card border border-border rounded-xl shadow-xl z-40 animate-scale-in">
               <div className="p-4 border-b border-border flex items-center justify-between">
                 <h3 className="font-semibold">Notifications</h3>
                 {unreadCount > 0 && <button onClick={markAllRead} className="text-xs text-primary hover:underline">Mark all read</button>}
@@ -236,10 +278,11 @@ export default function AppLayout() {
                 {notifications.length === 0 ? (
                   <p className="p-4 text-sm text-muted-foreground text-center">No notifications</p>
                 ) : notifications.map(n => (
-                  <Link key={n.id} to={n.data?.link || "#"} onClick={() => setNotifOpen(false)}
-                    className={cn("block px-4 py-3 border-b border-border hover:bg-muted transition-colors", !n.data?.read && "bg-primary/5")}>
-                    <p className="text-sm font-medium">{n.data?.title}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{n.data?.message}</p>
+                  <Link key={n.id} to={n.link || "#"} onClick={() => openNotification(n)}
+                    className={cn("block px-4 py-3 border-b border-border hover:bg-muted transition-colors", !n.read && "bg-primary/5")}>
+                    <p className="text-sm font-medium">{n.title}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{n.message}</p>
+                    <p className="text-[10px] text-muted-foreground/70 mt-1">{formatNotificationTime(n.created_date)}</p>
                   </Link>
                 ))}
               </div>
@@ -253,18 +296,20 @@ export default function AppLayout() {
         {/* Desktop top bar */}
         <header className="hidden lg:flex sticky top-0 z-20 bg-background/80 backdrop-blur-md border-b border-border h-16 items-center justify-between px-8">
           <div>
-            {!profile && !loading && (
+            {user && !profile && !loading && (
               <Link to="/profile" className="text-sm text-warning hover:underline">
                 Complete your profile to get started →
               </Link>
             )}
           </div>
+          {user ? (
           <button onClick={() => setNotifOpen(!notifOpen)} className="relative p-2.5 rounded-lg hover:bg-muted transition-colors">
             <Bell className="w-5 h-5" />
             {unreadCount > 0 && (
               <span className="absolute top-1.5 right-1.5 bg-destructive text-destructive-foreground text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center">{unreadCount}</span>
             )}
           </button>
+          ) : <span className="w-9" />}
         </header>
         <main className="min-h-[calc(100vh-3.5rem)] lg:min-h-0">
           <Outlet />

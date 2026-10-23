@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { requireAuth } from "../../middleware/auth";
+import { createNotification } from "../../services/notifications";
 
 type Env = {
   Bindings: {
@@ -158,6 +159,14 @@ viewings.post("/", async (c) => {
       );
     }
 
+    await createNotification(c.env.DB, {
+      userId: String(viewing.landlord_id),
+      type: "viewing_requested",
+      title: "New viewing request",
+      message: `Someone asked to view ${viewing.property_title || "your property"}.`,
+      link: "/owner-dashboard",
+    });
+
     return c.json(viewing, 201);
   } catch (error) {
     console.error("CREATE VIEWING ERROR:", error);
@@ -226,6 +235,8 @@ viewings.post("/:id/accept", async (c) => {
     SELECT
       v.id,
       v.status,
+      v.tenant_id,
+      p.title AS property_title,
       p.created_by_id AS landlord_id
     FROM viewings v
     JOIN properties p ON p.id = v.property_id
@@ -235,6 +246,8 @@ viewings.post("/:id/accept", async (c) => {
     id: string;
     status: string;
     landlord_id: string;
+    tenant_id: string;
+    property_title: string | null;
   }>();
 
   if (!viewing) {
@@ -256,6 +269,14 @@ viewings.post("/:id/accept", async (c) => {
         updated_date = ?
     WHERE id = ?
   `).bind(now, id).run();
+
+  await createNotification(c.env.DB, {
+    userId: viewing.tenant_id,
+    type: "viewing_accepted",
+    title: "Viewing confirmed",
+    message: `Your viewing request for ${viewing.property_title || "the property"} was accepted.`,
+    link: "/tenant-dashboard?tab=viewings",
+  });
 
   return c.json(
     await c.env.DB.prepare(`
@@ -279,6 +300,8 @@ viewings.post("/:id/decline", async (c) => {
     SELECT
       v.id,
       v.status,
+      v.tenant_id,
+      p.title AS property_title,
       p.created_by_id AS landlord_id
     FROM viewings v
     JOIN properties p ON p.id = v.property_id
@@ -287,6 +310,8 @@ viewings.post("/:id/decline", async (c) => {
   `).bind(id, user.id).first<{
     id: string;
     status: string;
+    tenant_id: string;
+    property_title: string | null;
   }>();
 
   if (!viewing) {
@@ -308,6 +333,14 @@ viewings.post("/:id/decline", async (c) => {
         updated_date = ?
     WHERE id = ?
   `).bind(now, id).run();
+
+  await createNotification(c.env.DB, {
+    userId: viewing.tenant_id,
+    type: "viewing_declined",
+    title: "Viewing declined",
+    message: `Your viewing request for ${viewing.property_title || "the property"} was declined.`,
+    link: "/tenant-dashboard?tab=viewings",
+  });
 
   return c.json(
     await c.env.DB.prepare(`
@@ -332,6 +365,7 @@ viewings.post("/:id/cancel", async (c) => {
       v.id,
       v.status,
       v.tenant_id,
+      p.title AS property_title,
       p.created_by_id AS landlord_id
     FROM viewings v
     JOIN properties p ON p.id = v.property_id
@@ -343,6 +377,9 @@ viewings.post("/:id/cancel", async (c) => {
   `).bind(id, user.id, user.id).first<{
     id: string;
     status: string;
+    tenant_id: string;
+    landlord_id: string;
+    property_title: string | null;
   }>();
 
   if (!viewing) {
@@ -364,6 +401,16 @@ viewings.post("/:id/cancel", async (c) => {
         updated_date = ?
     WHERE id = ?
   `).bind(now, id).run();
+
+  const cancelledByTenant = viewing.tenant_id === user.id;
+
+  await createNotification(c.env.DB, {
+    userId: cancelledByTenant ? viewing.landlord_id : viewing.tenant_id,
+    type: "viewing_cancelled",
+    title: "Viewing cancelled",
+    message: `A viewing for ${viewing.property_title || "a property"} was cancelled.`,
+    link: cancelledByTenant ? "/owner-dashboard" : "/tenant-dashboard?tab=viewings",
+  });
 
   return c.json(
     await c.env.DB.prepare(`

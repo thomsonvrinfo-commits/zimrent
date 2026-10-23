@@ -4,6 +4,7 @@ import {
   requireAdmin,
 } from "../../middleware/auth";
 import { hasApprovedAuthority } from "../../services/capabilities";
+import { createNotification } from "../../services/notifications";
 
 type Env = {
   Bindings: {
@@ -246,6 +247,14 @@ adminVerification.patch(
       );
     }
 
+    // Same separation-of-duties rule as property authority and listings.
+    if (existing.user_id === adminId) {
+      return c.json(
+        { message: "You cannot review your own identity verification" },
+        403
+      );
+    }
+
     const now = new Date().toISOString();
 
     await c.env.DB
@@ -266,6 +275,31 @@ adminVerification.patch(
       )
       .run();
 
+    // Keep the legacy profiles.identity_status (read by the public identity
+    // badge on listings and profiles) in step with the authoritative
+    // identity_verifications row — the same pattern used above for
+    // properties.verification_status. Without this the "Identity verified"
+    // badge could never appear, however many IDs were approved.
+    const PROFILE_IDENTITY_STATUS: Record<IdentityStatus, string> = {
+      verified: "identity_verified",
+      pending: "identity_pending",
+      rejected: "verification_failed",
+    };
+
+    await c.env.DB
+      .prepare(`
+        UPDATE profiles
+        SET identity_status = ?,
+            updated_date = ?
+        WHERE created_by_id = ?
+      `)
+      .bind(
+        PROFILE_IDENTITY_STATUS[status as IdentityStatus],
+        now,
+        existing.user_id
+      )
+      .run();
+
     await writeAuditLog(
       c.env.DB,
       adminId,
@@ -278,6 +312,19 @@ adminVerification.patch(
         new_status: status,
       }
     );
+
+    if (status === "verified" || status === "rejected") {
+      await createNotification(c.env.DB, {
+        userId: existing.user_id,
+        type: "identity_review",
+        title: status === "verified" ? "Identity verified" : "Identity not accepted",
+        message:
+          status === "verified"
+            ? "Your identity has been verified."
+            : "Your ID was not accepted. Please upload a clear photo or scan and resubmit.",
+        link: "/profile",
+      });
+    }
 
     const updated = await c.env.DB
       .prepare(`
@@ -530,6 +577,20 @@ adminVerification.patch(
       }
     );
 
+    if (status === "approved" || status === "rejected" || status === "revoked") {
+      await createNotification(c.env.DB, {
+        userId: existing.user_id,
+        type: "authority_review",
+        title:
+          status === "approved" ? "Property authority approved" : "Property authority not accepted",
+        message:
+          status === "approved"
+            ? "Your authority was approved. You can now create a listing."
+            : "Your authority evidence was not accepted. You can resubmit it from My Properties.",
+        link: "/my-properties",
+      });
+    }
+
     const updated = await c.env.DB
       .prepare(`
         SELECT
@@ -707,6 +768,24 @@ adminVerification.patch(
         new_status: status,
       }
     );
+
+    await createNotification(c.env.DB, {
+      userId: existing.created_by_id,
+      type: "listing_review",
+      title:
+        status === "active"
+          ? "Listing approved"
+          : status === "rejected"
+          ? "Listing not approved"
+          : "Listing deactivated",
+      message:
+        status === "active"
+          ? "Your listing is now live in Discover."
+          : status === "rejected"
+          ? "Your listing was not approved. You can submit it for review again."
+          : "Your listing has been taken offline.",
+      link: status === "active" ? `/property/${existing.property_id}` : "/my-properties",
+    });
 
     const updated = await c.env.DB
       .prepare(`

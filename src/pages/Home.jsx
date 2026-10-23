@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { zimrent } from "@/api/zimrentClient";
 import { useAuth } from "@/lib/AuthContext";
 import { Input } from "@/components/ui/input";
@@ -21,11 +22,35 @@ const CITIES = ["Harare", "Bulawayo", "Chitungwiza", "Mutare", "Gweru", "Kwekwe"
 // furnished, gated) and only ever returns properties with an ACTIVE listing.
 // Until listing activation is built (Phase 2), this will legitimately return
 // zero results — that's expected, not a bug in this file.
+// GET /properties returns flat rows (property columns + the active listing's
+// columns joined in). PropertyCard expects the normalized { id, data: {...} }
+// shape for both the property and its listing, so adapt each row here.
+function toCardEntities(row) {
+  const property = { id: row.id, created_by_id: row.created_by_id, data: row };
+  const listing = row.listing_id
+    ? {
+        id: row.listing_id,
+        property_id: row.id,
+        created_by_id: row.created_by_id,
+        data: {
+          status: row.listing_status,
+          available_from: row.available_from,
+          availability_confirmed_at: row.availability_confirmed_at,
+        },
+      }
+    : null;
+  return { property, listing };
+}
+
+const PAGE_SIZE = 24;
+
 export default function Home() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [allProperties, setAllProperties] = useState([]);
-  const [coverPhotos, setCoverPhotos] = useState({}); // property_id -> url
-  const [ownerProfiles, setOwnerProfiles] = useState({}); // created_by_id -> profile
+  const [total, setTotal] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [savedIds, setSavedIds] = useState(new Set());
   const [loading, setLoading] = useState(true);
   const [showFilters, setShowFilters] = useState(false);
@@ -41,46 +66,68 @@ export default function Home() {
   const [gatedOnly, setGatedOnly] = useState(false);
   const [petsAllowed, setPetsAllowed] = useState(false);
 
+  // Debounce the search box so we query the API after typing pauses.
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), 350);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  const buildFilters = () => ({
+    q: debouncedSearch || undefined,
+    city: city !== "all" ? city : undefined,
+    property_type: propertyType !== "all" ? propertyType : undefined,
+    max_rent: maxRent < 2000 ? maxRent : undefined,
+    bedrooms: minBedrooms > 0 ? minBedrooms : undefined,
+    min_bathrooms: minBathrooms > 0 ? minBathrooms : undefined,
+    furnished: furnishedOnly ? true : undefined,
+    gated: gatedOnly ? true : undefined,
+    pets_allowed: petsAllowed ? true : undefined,
+  });
+
+  // First page whenever a filter changes. Search, bathrooms, cover photo and
+  // owner name are all handled by the API now, so a page is a single request.
   useEffect(() => {
     let active = true;
     setLoading(true);
     (async () => {
       try {
-        const props = await zimrent.properties.list({
-          city: city !== "all" ? city : undefined,
-          property_type: propertyType !== "all" ? propertyType : undefined,
-          max_rent: maxRent < 2000 ? maxRent : undefined,
-          bedrooms: minBedrooms > 0 ? minBedrooms : undefined,
-          furnished: furnishedOnly ? true : undefined,
-          gated: gatedOnly ? true : undefined,
-          pets_allowed: petsAllowed ? true : undefined,
-          limit: 50,
+        const { rows, total: count } = await zimrent.properties.page({
+          ...buildFilters(),
+          limit: PAGE_SIZE,
+          offset: 0,
         });
         if (!active) return;
-        setAllProperties(props || []);
-
-        const photoEntries = await Promise.all((props || []).map(async (p) => {
-          try {
-            const media = await zimrent.properties.media(p.id);
-            const first = media?.[0];
-            return [p.id, first ? zimrent.properties.photoUrl(p.id, first.id) : null];
-          } catch { return [p.id, null]; }
-        }));
-        if (active) setCoverPhotos(Object.fromEntries(photoEntries.filter(([, url]) => url)));
-
-        const ownerIds = [...new Set((props || []).map(p => p.created_by_id).filter(Boolean))];
-        const ownerEntries = await Promise.all(ownerIds.map(async (id) => {
-          try { return [id, await zimrent.profiles.getByUserId(id)]; } catch { return [id, null]; }
-        }));
-        if (active) setOwnerProfiles(Object.fromEntries(ownerEntries.filter(([, p]) => p)));
+        setAllProperties(rows);
+        setTotal(count);
       } catch (e) {
-        if (active) setAllProperties([]);
+        if (active) { setAllProperties([]); setTotal(0); }
       } finally {
         if (active) setLoading(false);
       }
     })();
     return () => { active = false; };
-  }, [city, propertyType, maxRent, minBedrooms, furnishedOnly, gatedOnly, petsAllowed]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedSearch, city, propertyType, maxRent, minBedrooms, minBathrooms, furnishedOnly, gatedOnly, petsAllowed]);
+
+  const loadMore = async () => {
+    setLoadingMore(true);
+    try {
+      const { rows, total: count } = await zimrent.properties.page({
+        ...buildFilters(),
+        limit: PAGE_SIZE,
+        offset: allProperties.length,
+      });
+      setAllProperties((prev) => {
+        const seen = new Set(prev.map((p) => p.id));
+        return [...prev, ...rows.filter((r) => !seen.has(r.id))];
+      });
+      setTotal(count);
+    } catch (e) {
+      // keep what is already on screen
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   useEffect(() => {
     if (!user) return;
@@ -93,7 +140,7 @@ export default function Home() {
   }, [user]);
 
   const toggleSave = async (propertyId) => {
-    if (!user) return;
+    if (!user) { navigate("/login"); return; }
     try {
       if (savedIds.has(propertyId)) {
         await zimrent.savedProperties.unsave(propertyId);
@@ -105,18 +152,8 @@ export default function Home() {
     } catch (e) {}
   };
 
-  const filteredResults = useMemo(() => {
-    return allProperties.filter(p => {
-      if (verifiedOnly && p.verification_status !== "verified") return false;
-      if (p.bathrooms < minBathrooms) return false;
-      if (search) {
-        const q = search.toLowerCase();
-        const haystack = `${p.title} ${p.suburb} ${p.city}`.toLowerCase();
-        if (!haystack.includes(q)) return false;
-      }
-      return true;
-    });
-  }, [allProperties, verifiedOnly, minBathrooms, search]);
+  // The API now applies every filter, so the loaded rows are the results.
+  const filteredResults = allProperties;
 
   const hasActiveFilters = city !== "all" || propertyType !== "all" || maxRent < 2000 || minBedrooms > 0 || minBathrooms > 0 || furnishedOnly || verifiedOnly || gatedOnly || petsAllowed || search;
 
@@ -214,10 +251,7 @@ export default function Home() {
                   <input type="checkbox" checked={furnishedOnly} onChange={(e) => setFurnishedOnly(e.target.checked)} className="w-4 h-4 rounded accent-primary" />
                   Furnished only
                 </label>
-                <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input type="checkbox" checked={verifiedOnly} onChange={(e) => setVerifiedOnly(e.target.checked)} className="w-4 h-4 rounded accent-primary" />
-                  <ShieldCheck className="w-4 h-4" /> Verified only
-                </label>
+                {/* 'Verified only' filter removed until property verification can be submitted. */}
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
                   <input type="checkbox" checked={gatedOnly} onChange={(e) => setGatedOnly(e.target.checked)} className="w-4 h-4 rounded accent-primary" />
                   Gated
@@ -240,7 +274,7 @@ export default function Home() {
       <div className="px-4 sm:px-8 lg:px-12 max-w-7xl mx-auto py-8">
         <div className="flex items-center justify-between mb-5">
           <p className="text-sm text-muted-foreground">
-            {loading ? "Searching..." : `${filteredResults.length} ${filteredResults.length === 1 ? "property" : "properties"} available`}
+            {loading ? "Searching..." : `${total} ${total === 1 ? "property" : "properties"} available`}
           </p>
         </div>
         {loading ? (
@@ -253,25 +287,46 @@ export default function Home() {
             action={hasActiveFilters && <Button onClick={clearFilters} variant="outline">Clear filters</Button>}
           />
         ) : (
+          <>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 animate-fade-in">
-            {filteredResults.map(property => (
-              <PropertyCard
-                key={property.id}
-                property={property}
-                ownerProfile={ownerProfiles[property.created_by_id]}
-                coverPhotoUrl={coverPhotos[property.id]}
-                saved={savedIds.has(property.id)}
-                onToggleSave={() => toggleSave(property.id)}
-              />
-            ))}
+            {filteredResults.map(row => {
+              const { property, listing } = toCardEntities(row);
+              return (
+                <PropertyCard
+                  key={row.id}
+                  property={property}
+                  listing={listing}
+                  ownerProfile={
+                    row.owner_display_name || row.owner_identity_status
+                      ? { data: { display_name: row.owner_display_name, identity_status: row.owner_identity_status } }
+                      : null
+                  }
+                  coverPhotoUrl={
+                    row.cover_media_id
+                      ? zimrent.properties.photoUrl(row.id, row.cover_media_id)
+                      : null
+                  }
+                  saved={savedIds.has(row.id)}
+                  onToggleSave={() => toggleSave(row.id)}
+                />
+              );
+            })}
           </div>
+          {allProperties.length < total && (
+            <div className="flex justify-center mt-8">
+              <Button variant="outline" onClick={loadMore} disabled={loadingMore}>
+                {loadingMore ? "Loading..." : `Load more (${total - allProperties.length} more)`}
+              </Button>
+            </div>
+          )}
+          </>
         )}
       </div>
 
       <div className="px-4 sm:px-8 lg:px-12 max-w-7xl mx-auto pb-12">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {[
-            { icon: ShieldCheck, title: "Verified properties", desc: "Every listing goes through our property verification process." },
+            { icon: ShieldCheck, title: "Reviewed listings", desc: "Every listing is reviewed by our team before it goes live." },
             { icon: Building2, title: "Structured information", desc: "Utilities, security, rules, and costs — clearly laid out, not hidden in text." },
             { icon: Search, title: "Stay on the platform", desc: "Message, view, reserve, and sign — all without leaving Dzimba." }
           ].map((f, i) => (

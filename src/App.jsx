@@ -18,13 +18,8 @@ import Profile from '@/pages/Profile';
 import TenantDashboard from '@/pages/TenantDashboard';
 import OwnerDashboard from '@/pages/OwnerDashboard';
 import Messages from '@/pages/Messages';
-import Reserve from '@/pages/Reserve';
-import Apply from '@/pages/Apply';
-import Agreement from '@/pages/Agreement';
-import Tenancy from '@/pages/Tenancy';
 import AddProperty from '@/pages/AddProperty';
 import MyProperties from '@/pages/MyProperties';
-import ApplicationReview from '@/pages/ApplicationReview';
 import AdminDashboard from '@/pages/AdminDashboard';
 import { Navigate } from 'react-router-dom';
 
@@ -44,11 +39,11 @@ const AuthenticatedApp = () => {
   if (authError) {
     if (authError.type === 'user_not_registered') {
       return <UserNotRegisteredError />;
-    } else if (authError.type === 'auth_required') {
-      // Redirect to login automatically
-      navigateToLogin();
-      return null;
     }
+    // 'auth_required' (e.g. an expired token) no longer redirects every route
+    // to /login: Discover and property pages are public. Protected routes are
+    // still gated below by <ProtectedRoute>, which sends signed-out users to
+    // /login.
   }
 
   // Render the main app
@@ -58,23 +53,21 @@ const AuthenticatedApp = () => {
       <Route path="/register" element={<Register />} />
       <Route path="/forgot-password" element={<ForgotPassword />} />
       <Route path="/reset-password" element={<ResetPassword />} />
-      <Route element={<ProtectedRoute unauthenticatedElement={<Navigate to="/login" replace />} />}>
-        <Route element={<AppLayout />}>
-          <Route path="/" element={<Home />} />
-          <Route path="/property/:id" element={<PropertyDetail />} />
+      <Route element={<AppLayout />}>
+        {/* Public: anyone can browse listings and open a property. */}
+        <Route path="/" element={<Home />} />
+        <Route path="/property/:id" element={<PropertyDetail />} />
+
+        {/* Everything else needs an account. */}
+        <Route element={<ProtectedRoute unauthenticatedElement={<Navigate to="/login" replace />} />}>
           <Route path="/profile" element={<Profile />} />
           <Route path="/profile/:id" element={<Profile />} />
           <Route path="/tenant-dashboard" element={<TenantDashboard />} />
           <Route path="/owner-dashboard" element={<OwnerDashboard />} />
           <Route path="/messages" element={<Messages />} />
           <Route path="/messages/:conversationId" element={<Messages />} />
-          <Route path="/reserve/:listingId" element={<Reserve />} />
-          <Route path="/apply/:listingId" element={<Apply />} />
-          <Route path="/agreement/:id" element={<Agreement />} />
-          <Route path="/tenancy/:id" element={<Tenancy />} />
           <Route path="/add-property" element={<AddProperty />} />
           <Route path="/my-properties" element={<MyProperties />} />
-          <Route path="/application/:id" element={<ApplicationReview />} />
           <Route path="/admin" element={<AdminDashboard />} />
         </Route>
       </Route>

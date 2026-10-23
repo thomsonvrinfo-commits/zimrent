@@ -39,6 +39,7 @@ import {
 } from "lucide-react";
 import { IdentityBadge } from "@/components/VerificationBadge";
 import { LoadingState } from "@/components/EmptyState";
+import IdentityVerificationCard from "@/components/IdentityVerificationCard";
 import { formatDate, formatCurrency } from "@/lib/rental-utils";
 
 const CITIES = [
@@ -933,18 +934,7 @@ export default function Profile() {
                 }
               />
 
-              <VerificationItem
-                label="Identity verification"
-                done={isIdentityVerified}
-                pending={isIdentityPending}
-                description={
-                  isIdentityVerified
-                    ? "Your identity has been verified."
-                    : isIdentityPending
-                    ? "Your identity verification is under review."
-                    : "Identity verification will be available through the verification process."
-                }
-              />
+              <IdentityVerificationCard />
 
               {capabilities.includes("listing") && (
                 <VerificationItem

@@ -244,6 +244,16 @@ const properties = {
   async list(filters = {}) {
     return unwrap(await request(`/properties${toQuery(filters)}`));
   },
+  // One page of Discover results plus the total number of matches:
+  // { rows, total }. (list() above returns only the rows.)
+  async page(filters = {}) {
+    const result = await request(`/properties${toQuery(filters)}`);
+    const rows = Array.isArray(result?.data) ? result.data : [];
+    return {
+      rows,
+      total: typeof result?.total === 'number' ? result.total : rows.length,
+    };
+  },
   async mine() {
     const result = await request('/properties/mine');
     return Array.isArray(result?.data) ? result.data : [];
@@ -259,8 +269,13 @@ const properties = {
     const rows = Array.isArray(result?.data) ? result.data : [];
     return rows.map(splitPropertyListingRow);
   },
+  // Returns { property, listing } — both normalized (.data.*) — because
+  // GET /properties/:id returns one flat row with the listing columns
+  // joined in. PropertyDetail (the only caller) is written against this
+  // shape; returning the raw row made result.property undefined and sent
+  // every property page to "Listing not found".
   async get(id) {
-    return unwrap(await request(`/properties/${encodeURIComponent(id)}`));
+    return splitPropertyListingRow(unwrap(await request(`/properties/${encodeURIComponent(id)}`)));
   },
   async media(propertyId) {
     return unwrap(await request(`/properties/${encodeURIComponent(propertyId)}/media`));
@@ -442,6 +457,29 @@ const integrations = {
 // ---------------------------------------------------------------------------
 // admin verification
 // ---------------------------------------------------------------------------
+// Admin-only private evidence documents. A plain <a href> can't send the
+// bearer token, so the document is fetched with it and handed back as a Blob.
+async function fetchAdminDocument(kind, documentId) {
+  const headers = new Headers();
+  const token = getToken();
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  const response = await fetch(
+    `${API_BASE_URL}/media/document/${encodeURIComponent(kind)}/${encodeURIComponent(documentId)}`,
+    { headers, credentials: 'include' }
+  );
+  if (!response.ok) {
+    let message = response.statusText || 'Failed to load document';
+    try {
+      const payload = await response.json();
+      message = payload?.message || message;
+    } catch {}
+    const error = new Error(message);
+    error.status = response.status;
+    throw error;
+  }
+  return { blob: await response.blob() };
+}
+
 const admin = {
   async identityQueue() {
     const result = await request('/admin/verification/identity');
@@ -484,24 +522,14 @@ const admin = {
     }))?.data;
   },
   async documentUrl(kind, documentId) {
-    const headers = new Headers();
-    const token = getToken();
-    if (token) headers.set('Authorization', `Bearer ${token}`);
-    const response = await fetch(
-      `${API_BASE_URL}/media/document/${encodeURIComponent(kind)}/${encodeURIComponent(documentId)}`,
-      { headers, credentials: 'include' }
-    );
-    if (!response.ok) {
-      let message = response.statusText || 'Failed to load document';
-      try {
-        const payload = await response.json();
-        message = payload?.message || message;
-      } catch {}
-      const error = new Error(message);
-      error.status = response.status;
-      throw error;
-    }
-    return URL.createObjectURL(await response.blob());
+    const { blob } = await fetchAdminDocument(kind, documentId);
+    return URL.createObjectURL(blob);
+  },
+  // Same private document, plus its content type so the Admin Console can
+  // preview images and PDFs inline instead of opening a blob: tab.
+  async documentPreview(kind, documentId) {
+    const { blob } = await fetchAdminDocument(kind, documentId);
+    return { url: URL.createObjectURL(blob), type: blob.type || '' };
   },
 };
 

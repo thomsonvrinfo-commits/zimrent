@@ -119,16 +119,7 @@ export default function Messages() {
                     <Link to={`/property/${activeConvo.property_id}`}><MapPin className="w-3.5 h-3.5 mr-1.5" /> View property</Link>
                   </Button>
                 )}
-                {activeConvo.listing_id && (
-                  <>
-                    <Button size="sm" variant="outline" className="h-8 text-xs" asChild>
-                      <Link to={`/reserve/${activeConvo.listing_id}`}><Lock className="w-3.5 h-3.5 mr-1.5" /> Reserve</Link>
-                    </Button>
-                    <Button size="sm" variant="outline" className="h-8 text-xs" asChild>
-                      <Link to={`/apply/${activeConvo.listing_id}`}><FileText className="w-3.5 h-3.5 mr-1.5" /> Apply</Link>
-                    </Button>
-                  </>
-                )}
+                {/* Reserve / Apply actions return when reservations and applications have a backend. */}
                 <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => navigate(`/property/${activeConvo.property_id}`)}>
                   <Calendar className="w-3.5 h-3.5 mr-1.5" /> Schedule viewing
                 </Button>
