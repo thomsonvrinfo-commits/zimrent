@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { zimrent } from "@/api/zimrentClient";
 import { useProfile } from "@/hooks/useProfile";
 import { useAuth } from "@/lib/AuthContext";
@@ -31,6 +31,10 @@ export default function AdminDashboard() {
   const { user } = useAuth();
 const { isAdmin } = useProfile();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const initialTab = ["identity", "property", "authority", "listings"].includes(searchParams.get("tab"))
+    ? searchParams.get("tab")
+    : "identity";
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -128,15 +132,16 @@ const { isAdmin } = useProfile();
         </Card>
       )}
 
-      <Tabs defaultValue="identity" className="w-full">
+      <Tabs defaultValue={initialTab} className="w-full">
         <TabsList className="grid w-full grid-cols-4 mb-5">
-          <TabsTrigger value="identity">Identity ({pendingIdentity.length})</TabsTrigger>
-          <TabsTrigger value="property">Property ({pendingProperty.length})</TabsTrigger>
-          <TabsTrigger value="authority">Authority ({pendingAuthority.length})</TabsTrigger>
-          <TabsTrigger value="listings">Listings ({pendingListings.length})</TabsTrigger>
+          <TabsTrigger value="identity" className="px-1 text-[11px] sm:text-sm">Identity ({pendingIdentity.length})</TabsTrigger>
+          <TabsTrigger value="property" className="px-1 text-[11px] sm:text-sm">Property ({pendingProperty.length})</TabsTrigger>
+          <TabsTrigger value="authority" className="px-1 text-[11px] sm:text-sm">Authority ({pendingAuthority.length})</TabsTrigger>
+          <TabsTrigger value="listings" className="px-1 text-[11px] sm:text-sm">Listings ({pendingListings.length})</TabsTrigger>
         </TabsList>
 
         <TabsContent value="identity" className="space-y-3">
+          <p className="text-xs text-muted-foreground">The number on the tab is IDs waiting for review. Reviewed IDs stay listed below.</p>
           {identityQueue.length === 0 ? (
             <EmptyState
               icon={UserCheck}
@@ -145,14 +150,14 @@ const { isAdmin } = useProfile();
             />
           ) : identityQueue.map((r) => (
             <Card key={r.id} className="border-border">
-              <CardContent className="p-4 flex items-center justify-between gap-4">
+              <CardContent className="p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                 <div className="min-w-0">
-                  <p className="font-medium text-sm truncate">{r.display_name || r.email}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">
+                  <p className="font-medium text-sm break-words sm:truncate">{r.display_name || r.email}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5 break-words">
                     {r.email} · Submitted {formatDate(r.created_date)}
                   </p>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
                   <StateBadge status={r.status} label={r.status} color={STATUS_COLOR[r.status] || "secondary"} />
                   {r.evidence_document_id && (
                     <Button
@@ -191,6 +196,7 @@ const { isAdmin } = useProfile();
         </TabsContent>
 
         <TabsContent value="property" className="space-y-3">
+          <p className="text-xs text-muted-foreground">Property verification requests can't be submitted yet, so this tab is expected to be empty. Property trust currently comes from approved authority plus an approved listing.</p>
           {propertyQueue.length === 0 ? (
             <EmptyState
               icon={Building2}
@@ -199,14 +205,14 @@ const { isAdmin } = useProfile();
             />
           ) : propertyQueue.map((r) => (
             <Card key={r.id} className="border-border">
-              <CardContent className="p-4 flex items-center justify-between gap-4">
+              <CardContent className="p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                 <div className="min-w-0">
-                  <p className="font-medium text-sm truncate">{r.title || "Untitled property"}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">
+                  <p className="font-medium text-sm break-words sm:truncate">{r.title || "Untitled property"}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5 break-words">
                     {r.suburb ? `${r.suburb}, ` : ""}{r.city} · Submitted {formatDate(r.created_date)}
                   </p>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
                   <StateBadge status={r.status} label={r.status} color={STATUS_COLOR[r.status] || "secondary"} />
                   {r.status === "pending" && (
                     <>
@@ -233,6 +239,7 @@ const { isAdmin } = useProfile();
         </TabsContent>
 
         <TabsContent value="authority" className="space-y-3">
+          <p className="text-xs text-muted-foreground">The number on the tab is authority requests waiting for review. Reviewed requests stay listed below.</p>
           {authorityQueue.length === 0 ? (
             <EmptyState
               icon={FileCheck}
@@ -241,14 +248,14 @@ const { isAdmin } = useProfile();
             />
           ) : authorityQueue.map((r) => (
             <Card key={r.id} className="border-border">
-              <CardContent className="p-4 flex items-center justify-between gap-4">
+              <CardContent className="p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                 <div className="min-w-0">
-                  <p className="font-medium text-sm truncate">{r.title || "Untitled property"}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">
+                  <p className="font-medium text-sm break-words sm:truncate">{r.title || "Untitled property"}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5 break-words">
                     {r.display_name || r.email} · {r.suburb ? `${r.suburb}, ` : ""}{r.city} · Submitted {formatDate(r.created_date)}
                   </p>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
                   <StateBadge status={r.status} label={r.status} color={STATUS_COLOR[r.status] || "secondary"} />
                   {r.evidence_document_id && (
                     <Button
@@ -287,6 +294,7 @@ const { isAdmin } = useProfile();
         </TabsContent>
 
         <TabsContent value="listings" className="space-y-3">
+          <p className="text-xs text-muted-foreground">The number on the tab is listings waiting for approval. Approving a listing makes it live in Discover.</p>
           {listingQueue.length === 0 ? (
             <EmptyState
               icon={ListChecks}
@@ -295,10 +303,10 @@ const { isAdmin } = useProfile();
             />
           ) : listingQueue.map((r) => (
             <Card key={r.id} className="border-border">
-              <CardContent className="p-4 flex items-center justify-between gap-4">
+              <CardContent className="p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                 <div className="min-w-0">
-                  <p className="font-medium text-sm truncate">{r.title || "Untitled property"}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">
+                  <p className="font-medium text-sm break-words sm:truncate">{r.title || "Untitled property"}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5 break-words">
                     {r.display_name || r.email} · {r.suburb ? `${r.suburb}, ` : ""}{r.city} · Submitted {formatDate(r.created_date)}
                   </p>
                   {r.owner_authority_status && r.owner_authority_status !== "approved" && (
@@ -307,7 +315,7 @@ const { isAdmin } = useProfile();
                     </p>
                   )}
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
                   <StateBadge
                     status={r.status}
                     label={r.status === "pending_verification" ? "pending" : r.status}

@@ -15,6 +15,7 @@ import {
   Video, Loader2
 } from "lucide-react";
 import { PropertyVerificationBadge, IdentityBadge } from "@/components/VerificationBadge";
+import AuthImage from "@/components/AuthImage";
 import StateBadge from "@/components/StateBadge";
 import EmptyState, { LoadingState } from "@/components/EmptyState";
 import {
@@ -234,7 +235,7 @@ const photos = propertyMedia
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 rounded-2xl overflow-hidden">
           <div className="lg:col-span-2 aspect-[16/10] bg-muted relative">
             {photos[activePhoto] ? (
-              <Image
+              <AuthImage
                 src={photos[activePhoto]}
                 alt={d.title}
                 className="w-full h-full"
@@ -264,7 +265,7 @@ const photos = propertyMedia
                   photos.length > 1 && setActivePhoto(i + 1)
                 }
               >
-                <Image
+                <AuthImage
                   src={p}
                   alt=""
                   className="w-full h-full"
@@ -287,7 +288,7 @@ const photos = propertyMedia
                     : "border-transparent"
                 }`}
               >
-                <Image
+                <AuthImage
                   src={p}
                   alt=""
                   className="w-full h-full"
@@ -320,7 +321,7 @@ const photos = propertyMedia
                 onClick={() => setShowVideo(true)}
                 className="relative w-full aspect-video rounded-2xl overflow-hidden group"
               >
-                <Image
+                <AuthImage
                   src={
                     photos[0] ||
                     "https://images.unsplash.com/photo-1568605114967-8130f3a36994?w=1200"
@@ -366,9 +367,19 @@ const photos = propertyMedia
                 />
               )}
 
-              <PropertyVerificationBadge
-                status={d.verification_status}
-              />
+              {d.verification_status &&
+              d.verification_status !== "unverified" ? (
+                <PropertyVerificationBadge
+                  status={d.verification_status}
+                />
+              ) : status === "active" ? (
+                <Badge
+                  variant="outline"
+                  className="text-success border-success/30"
+                >
+                  Reviewed listing
+                </Badge>
+              ) : null}
 
               {isStaleAvailability(
                 listingData?.availability_confirmed_at
@@ -399,7 +410,7 @@ const photos = propertyMedia
                   className="text-muted-foreground"
                   style={{ width: 18, height: 18 }}
                 />
-                {d.bedrooms} bedrooms
+                {d.bedrooms} {Number(d.bedrooms) === 1 ? "bedroom" : "bedrooms"}
               </span>
 
               <span className="flex items-center gap-1.5">
@@ -407,7 +418,7 @@ const photos = propertyMedia
                   className="text-muted-foreground"
                   style={{ width: 18, height: 18 }}
                 />
-                {d.bathrooms} bathrooms
+                {d.bathrooms} {Number(d.bathrooms) === 1 ? "bathroom" : "bathrooms"}
               </span>
 
               {d.parking_spaces > 0 && (
@@ -424,7 +435,7 @@ const photos = propertyMedia
                 {PROPERTY_TYPES[d.property_type]}
               </span>
 
-              {d.furnished && (
+              {Boolean(d.furnished) && (
                 <span className="flex items-center gap-1.5">
                   <Sofa className="w-4 h-4 text-muted-foreground" />
                   Furnished
@@ -822,7 +833,7 @@ const photos = propertyMedia
                     </p>
 
                     <p className="text-xs text-muted-foreground capitalize">
-                      {ownerProfile.data?.role}
+                      Property lister
                     </p>
                   </div>
                 </Link>
@@ -884,7 +895,7 @@ const photos = propertyMedia
                 <TrustItem
                   label="Listing authority verified"
                   done={
-                    d.authority_status === "verified"
+                    ["approved", "verified"].includes(d.authority_status)
                   }
                   pending={
                     d.authority_status === "pending"

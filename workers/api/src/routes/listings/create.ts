@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { requireAuth } from "../../middleware/auth";
+import { notifyAdmins } from "../../services/notifications";
 import {
   hasCapability,
   hasApprovedAuthority,
@@ -144,6 +145,14 @@ create.post("/", async (c) => {
       now
     )
     .run();
+
+  await notifyAdmins(c.env.DB, {
+    type: "admin_listing",
+    title: "New listing to review",
+    message: "A listing is waiting for approval.",
+    link: "/admin?tab=listings",
+    exceptUserId: userId,
+  });
 
   const listing = await c.env.DB
     .prepare(`

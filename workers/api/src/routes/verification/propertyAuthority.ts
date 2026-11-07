@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { requireAuth } from "../../middleware/auth";
+import { notifyAdmins } from "../../services/notifications";
 
 type Env = {
   Bindings: {
@@ -270,6 +271,14 @@ propertyAuthority.post("/", async (c) => {
       )
       .run();
   }
+
+  await notifyAdmins(c.env.DB, {
+    type: "admin_authority",
+    title: "New authority request",
+    message: "Property authority evidence is waiting for review.",
+    link: "/admin?tab=authority",
+    exceptUserId: userId,
+  });
 
   const authority = await c.env.DB
     .prepare(`

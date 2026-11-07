@@ -83,3 +83,35 @@ export async function createNotification(
     console.error("createNotification failed", error);
   }
 }
+
+// Tell every admin that something is waiting for review. The person who made
+// the submission is skipped (an admin cannot review their own item anyway).
+// Repeat submissions refresh one unread notification per queue instead of
+// piling up, and — like createNotification — this never throws.
+export async function notifyAdmins(
+  db: D1Database,
+  input: Omit<NotificationInput, "userId" | "dedupe"> & {
+    exceptUserId?: string;
+  }
+): Promise<void> {
+  try {
+    const admins = await db
+      .prepare(`SELECT id FROM users WHERE is_admin = 1`)
+      .all<{ id: string }>();
+
+    for (const admin of admins.results) {
+      if (admin.id === input.exceptUserId) continue;
+
+      await createNotification(db, {
+        userId: admin.id,
+        type: input.type,
+        title: input.title,
+        message: input.message,
+        link: input.link,
+        dedupe: true,
+      });
+    }
+  } catch (error) {
+    console.error("notifyAdmins failed", error);
+  }
+}

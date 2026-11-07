@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { requireAuth } from "../../middleware/auth";
+import { notifyAdmins } from "../../services/notifications";
 
 type Env = {
   Bindings: {
@@ -176,6 +177,14 @@ identityVerification.post("/", async (c) => {
       )
       .run();
   }
+
+  await notifyAdmins(c.env.DB, {
+    type: "admin_identity",
+    title: "New ID to review",
+    message: "A user submitted an ID for verification.",
+    link: "/admin?tab=identity",
+    exceptUserId: userId,
+  });
 
   const verification = await c.env.DB
     .prepare(`
